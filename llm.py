@@ -25,7 +25,7 @@ FALLBACK = {
     "distracted": "Eyes back on the road, please.",
     "phone": "Please put the phone down and focus on driving.",
 }
-UNSAFE = ["keep your eyes closed", "close your eyes", "sleep", "nap",   # dangerous advice
+UNSAFE = ["keep your eyes closed", "close your eyes", "go to sleep", "get some sleep", "nap",  # dangerous advice
           "i cannot", "i can't", "sorry", "i don't", "as an ai"]          # refusals / nonsense
 # the alert must mention at least one of these, or it's off-topic
 RELEVANT = {
