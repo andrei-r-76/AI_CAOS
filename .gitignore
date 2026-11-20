@@ -13,6 +13,7 @@ __pycache__/
 # Models / local artifacts
 *.pt
 *.task
+models/
 recordings/
 
 # Editors / OS
