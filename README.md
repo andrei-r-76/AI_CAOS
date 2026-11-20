@@ -14,12 +14,13 @@ webcam ─► vision.py ──DriverState──► llm.py ──Alert──► t
 
 ## How to run
 ```bash
-python3.11 -m venv .venv && source .venv/bin/activate   # MediaPipe needs Python 3.9–3.12
-python scripts/webcam_test.py   # sanity check: webcam + MediaPipe (q to quit)
-pip install -r requirements.txt
+# 1. install uv: https://docs.astral.sh/uv/getting-started/installation/
+#    (Linux/macOS: curl -LsSf https://astral.sh/uv/install.sh | sh)
+uv sync                                   # installs Python 3.11 + all dependencies into .venv
+uv run python scripts/webcam_test.py      # sanity check: webcam + MediaPipe (q to quit)
 cp .env.example .env          # pick the LLM provider/model
 # for the default local LLM: install Ollama, then `ollama pull llama3.2:3b`
-python -m src.main
+uv run python -m src.main
 # dashboard: http://localhost:8000
 ```
 
@@ -35,6 +36,12 @@ python -m src.main
 | `dashboard/` | live web dashboard |
 | `docs/research.md` | research on existing driver-monitoring systems |
 | `presentation/` | final presentation |
+
+## Adding a dependency
+```bash
+uv add <package>      # updates pyproject.toml + uv.lock, commit both
+```
+Don't use `pip install`: everyone must stay on the same `uv.lock`.
 
 ## Team workflow
 See [CONTRIBUTING.md](CONTRIBUTING.md): feature branches → `dev` → `main`.

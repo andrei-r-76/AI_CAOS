@@ -11,12 +11,12 @@ It must run **live** on a laptop webcam. No pre-recorded video.
 4. Small commits, Conventional Commits format (`feat(vision): …`). Keep the `Co-Authored-By` trailer.
 5. Keep it simple: phase 1 is EAR/PERCLOS + head pose → LLM message → TTS → dashboard. Don't add new features or dependencies unless asked.
 6. Thresholds go in `src/config.py`, not hard-coded.
-7. Modules talk only through the dataclasses in `src/events.py`.
+7. Python env is managed by **uv** only: `uv add <pkg>` for dependencies (commit `pyproject.toml` + `uv.lock`), `uv run ...` to run. Never `pip install`.
+8. Modules talk only through the dataclasses in `src/events.py`.
 
 ## Run
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+uv sync
 cp .env.example .env
-python -m src.main
+uv run python -m src.main
 ```
