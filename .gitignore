@@ -20,3 +20,4 @@ recordings/
 .vscode/
 .idea/
 .DS_Store
+*_landmarker.task
