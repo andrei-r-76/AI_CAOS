@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Driver Monitoring System</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body data-lang="{{ lang }}">
+
+<header class="topbar">
+  <h1>Driver Monitoring System</h1>
+  <div class="top-right">
+    <span class="live-status"><i id="conn-light" class="dot off"></i><span id="conn-text">Connecting…</span></span>
+    <label class="switch"><input type="checkbox" id="voice-toggle" checked> Car voice</label>
+    <button id="demo-toggle" class="ghost">Scenarios</button>
+  </div>
+</header>
+
+<div id="demo" class="demo" hidden>
+  <button class="scen on" data-name="auto">Auto</button>
+  <button class="scen" data-name="normal">Normal</button>
+  <button class="scen" data-name="yawn">Yawning</button>
+  <button class="scen" data-name="drowsy">Drowsy</button>
+  <button class="scen" data-name="microsleep">Microsleep</button>
+  <button class="scen" data-name="distracted">Looking away</button>
+  <button class="scen" data-name="phone">Phone</button>
+</div>
+
+<main class="layout-16-9">
+  <!-- LEFT COLUMN: DRIVER STATUS, GUIDANCE, METRICS & PLAIN-TEXT CHAT -->
+  <section class="left-col">
+    <!-- Driver Status & Guidance -->
+    <div id="hero" class="panel status-panel state-ok">
+      <div class="status-top">
+        <span class="field-label">Driver Status</span>
+        <div class="status-title" id="hero-state">Alert</div>
+        <div class="status-sub" id="hero-sub">Driver looks attentive.</div>
+      </div>
+      <div class="guidance-box">
+        <span class="field-label">Live Suggestion</span>
+        <p id="suggestion-text">Attention level optimal. Keep your eyes on the road ahead.</p>
+      </div>
+    </div>
+
+    <!-- Key Driver Metrics (No Outlines) -->
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <span class="metric-label">Eyes Closed (PERCLOS)</span>
+        <b class="metric-value primary-val" id="m-perclos">—</b>
+      </div>
+
+      <div class="metric-card">
+        <span class="metric-label">Eye Openness (EAR)</span>
+        <b class="metric-value primary-val" id="m-ear">—</b>
+      </div>
+
+      <div class="metric-card">
+        <span class="metric-label">Phone Detected</span>
+        <b class="metric-value primary-val" id="m-phone">—</b>
+      </div>
+
+      <div class="metric-card">
+        <span class="metric-label">Head Yaw (Left / Right)</span>
+        <b class="metric-value" id="m-yaw">—</b>
+      </div>
+
+      <div class="metric-card">
+        <span class="metric-label">Head Pitch (Nodding)</span>
+        <b class="metric-value" id="m-pitch">—</b>
+      </div>
+
+      <div class="metric-card">
+        <span class="metric-label">Mouth Opening (MAR)</span>
+        <b class="metric-value" id="m-mar">—</b>
+      </div>
+    </div>
+
+    <!-- Plain-Text Chat (Matches Log Style) -->
+    <div class="panel chat-panel">
+      <div class="panel-header">
+        <h2>Voice &amp; Text Dialogue</h2>
+      </div>
+      <div id="chat" class="chat-list">
+        <div class="chat-row">
+          <span class="chat-meta">System</span>
+          <span class="chat-text">Hi! Tap the microphone or press Space to talk.</span>
+        </div>
+      </div>
+      <div class="mic-bar">
+        <button id="mic" class="mic-btn" aria-label="Talk to the car">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <rect x="9" y="3" width="6" height="12" rx="3"/>
+            <path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>
+          </svg>
+        </button>
+        <span id="mic-hint" class="mic-hint">Tap or press Space to talk</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT COLUMN: WIDE, TALL DETECTION LOG -->
+  <section class="right-col">
+    <div class="panel log-panel">
+      <div class="panel-header">
+        <h2>Detection &amp; Response Log</h2>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Detection</th>
+              <th>Severity</th>
+              <th>System Response</th>
+            </tr>
+          </thead>
+          <tbody id="log-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
