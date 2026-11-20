@@ -53,6 +53,7 @@ git commit -m "MESAJ"               # Saves the staged changes locally.
 git push -u origin NUME_BRANCH      # Push
 git switch NUME_BRANCH              # Change to branch
 git switch -c feat/NUME_TASK        # Create new branch
+git --no-pager log -10 --oneline    # Last 10 commits
 
 # USUAL WORKFLOW:
 # Pull the latest dev and create your task branch
@@ -64,3 +65,9 @@ git switch -c feat/sample_branch
 git add .
 git commit -m "test message"
 git push -u origin feat/sample_branch
+
+# Use git merge locally when your feature branch needs the latest changes from dev:
+git switch feat/docs-live-test
+git fetch origin
+git merge origin/dev
+git push
