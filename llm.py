@@ -102,12 +102,19 @@ def get_alert(state):
 if __name__ == "__main__":
     import time
 
+    from state import new_state
+
+    def fake(**values):
+        s = new_state()
+        s.update(face_found=True, **values)
+        return s
+
     warm_up()
     fake_states = [
-        {"eyes_closed_sec": 0, "perclos": 0.05, "looking_away_sec": 0, "hand_near_face": False},
-        {"eyes_closed_sec": 2.1, "perclos": 0.2, "looking_away_sec": 0, "hand_near_face": False},
-        {"eyes_closed_sec": 0, "perclos": 0.05, "looking_away_sec": 3.4, "hand_near_face": False},
-        {"eyes_closed_sec": 0, "perclos": 0.05, "looking_away_sec": 0, "hand_near_face": True},
+        fake(perclos=0.05),                      # all good -> None
+        fake(eyes_closed_sec=2.1, perclos=0.2),  # drowsy
+        fake(looking_away_sec=3.4),              # distracted
+        fake(hand_near_face=True),               # phone
     ]
     for s in fake_states * 3:
         t = time.time()
