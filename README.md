@@ -70,4 +70,3 @@ git push -u origin feat/sample_branch
 git switch feat/docs-live-test
 git fetch origin
 git merge origin/dev
-git push
