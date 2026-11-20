@@ -1,0 +1,21 @@
+# Organizer materials: confidential under NDA (rules Art. 7.3). Never commit or paste into AI tools.
+context/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+
+# Models / local artifacts
+*.pt
+*.task
+recordings/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
