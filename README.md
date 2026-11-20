@@ -14,7 +14,8 @@ webcam ─► vision.py ──DriverState──► llm.py ──Alert──► t
 
 ## How to run
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python3.11 -m venv .venv && source .venv/bin/activate   # MediaPipe needs Python 3.9–3.12
+python scripts/webcam_test.py   # sanity check: webcam + MediaPipe (q to quit)
 pip install -r requirements.txt
 cp .env.example .env          # pick the LLM provider/model
 # for the default local LLM: install Ollama, then `ollama pull llama3.2:3b`
