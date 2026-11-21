@@ -10,6 +10,8 @@ from collections import deque
 
 import numpy as np
 
+from timing import Held
+
 HEAD_DROP_DEG = 20.0       # TUNE: the head must go down at least this much (degrees, vs the road pose)...
 HEAD_DROP_WINDOW = 0.7     # TUNE: ...within this many seconds (fast = falling, not looking at the phone)
 HEAD_DROP_HARD = 35.0      # TUNE: a drop this deep counts even with the eyes open
@@ -38,7 +40,7 @@ class HeadTracker:
         self.hist = deque()          # (t, down_deg, eyes_closed) over HEAD_DROP_WINDOW
         self.drop_since = None
         self.nods = deque()
-        self.tilt_since = None
+        self.tilt = Held(ROLL_MIN_S)
 
     def update(self, t, yaw, pitch, roll, eyes_closed, down_sign=1.0):
         """yaw/pitch/roll relative to the calibrated road pose; down_sign from ZoneModel."""
@@ -60,11 +62,11 @@ class HeadTracker:
         while self.nods and t - self.nods[0] > HEAD_NOD_WINDOW:
             self.nods.popleft()
 
-        self.tilt_since = (self.tilt_since or t) if abs(roll) > ROLL_MAX else None
+        tilted = self.tilt.update(t, abs(roll) > ROLL_MAX)
 
         return {
             "head_drop": self.drop_since is not None,
             "head_down_sec": round(t - self.drop_since, 1) if self.drop_since is not None else 0.0,
             "head_nods_1min": len(self.nods),
-            "head_tilt": self.tilt_since is not None and t - self.tilt_since >= ROLL_MIN_S,
+            "head_tilt": tilted,
         }

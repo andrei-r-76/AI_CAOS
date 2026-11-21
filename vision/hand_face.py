@@ -7,16 +7,19 @@
 """
 import math
 
+from timing import Held
+
 HAND_POINTS = (0, 4, 8, 12, 16, 20)   # wrist + the 5 fingertips
 FINGERTIPS = (4, 8, 12, 16, 20)
 EAR_POINTS = (234, 454)               # face-mesh points at the sides of the face, near the ears
 EYE_CENTERS = (468, 473)              # iris centers
-MOUTH_CENTER = 13                     # upper inner lip
+MOUTH_POINTS = (13, 14, 61, 291)      # upper lip, lower lip, left corner, right corner (whole mouth)
 
 FACE_MARGIN = 0.20         # TUNE: face box expanded by this fraction for "near the face"
+                           #       (shared: objects.py uses the same value for a phone near the face)
 EAR_RADIUS = 0.30          # TUNE: hand point within this * face width of an ear point = "at the ear"
 EYE_RADIUS = 0.22          # TUNE: fingertip within this * face width of an eye = "at the eyes"
-MOUTH_RADIUS = 0.25        # TUNE: hand point within this * face width of the mouth = "at the mouth"
+MOUTH_RADIUS = 0.15        # TUNE: hand point within this * face width of ANY mouth point = "at the mouth"
 NEAR_FACE_MIN_S = 0.3      # TUNE: each condition must last this long before it is reported
 AT_EAR_MIN_S = 1.0         # TUNE: (a phone call is held, not a quick scratch)
 AT_EYES_MIN_S = 0.5
@@ -30,13 +33,12 @@ GHOST_MAX_SIZE = 0.70      # TUNE: a "hand" that lies COMPLETELY inside the face
 HAND_CONFIRM_FRAMES = 3    # TUNE: a hand must be seen this many frames in a row before it is used
 
 
-def is_ghost(hand, face_xy):
-    """True if the detected hand is fully inside the face box and small: a false hand on the face."""
-    if face_xy is None:
+def is_ghost(hand, face_box):
+    """True if the detected hand is fully inside the face box and small: a false hand on the face.
+    face_box: (x0, y0, x1, y1) of the face, computed once per frame in face_basic.py (None = no face)."""
+    if face_box is None:
         return False
-    xs = [p[0] for p in face_xy]
-    ys = [p[1] for p in face_xy]
-    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    x0, y0, x1, y1 = face_box
     fw = x1 - x0
     inside = all(x0 <= x <= x1 and y0 <= y <= y1 for x, y in hand)
     hx, hy = [p[0] for p in hand], [p[1] for p in hand]
@@ -50,26 +52,27 @@ class HandFilter:
     def __init__(self):
         self.streak = 0
 
-    def update(self, hands_px, scores, face_xy):
+    def update(self, hands_px, scores, face_box):
         good = [h for h, sc in zip(hands_px, scores)
-                if sc >= HAND_MIN_SCORE and not is_ghost(h, face_xy)]
+                if sc >= HAND_MIN_SCORE and not is_ghost(h, face_box)]
         self.streak = self.streak + 1 if good else 0
         return good if self.streak >= HAND_CONFIRM_FRAMES else []
 
 
 class HandFaceTracker:
     def __init__(self):
-        self.since = {"near_face": None, "at_ear": None, "at_eyes": None, "at_mouth": None}
+        self.held = {"near_face": Held(NEAR_FACE_MIN_S), "at_ear": Held(AT_EAR_MIN_S),
+                     "at_eyes": Held(AT_EYES_MIN_S), "at_mouth": Held(AT_MOUTH_MIN_S)}
 
-    def update(self, t, hands_px, face_xy):
-        """hands_px: list of hands, each a list of 21 (x, y) pixel points; face_xy: 478 (x, y) points or None."""
+    def update(self, t, hands_px, face_xy, face_box):
+        """hands_px: list of hands, each a list of 21 (x, y) pixel points; face_xy: 478 (x, y) points or None;
+        face_box: (x0, y0, x1, y1) of the face, computed once per frame in face_basic.py (None = no face)."""
         now = {"near_face": False, "at_ear": False, "at_eyes": False, "at_mouth": False}
-        if face_xy is not None and hands_px:
-            xs = [p[0] for p in face_xy]
-            ys = [p[1] for p in face_xy]
-            fw, fh = max(xs) - min(xs), max(ys) - min(ys)
+        if face_xy is not None and face_box is not None and hands_px:
+            x0, y0, x1, y1 = face_box
+            fw, fh = x1 - x0, y1 - y0
             mx, my = fw * FACE_MARGIN, fh * FACE_MARGIN
-            box = (min(xs) - mx, min(ys) - my, max(xs) + mx, max(ys) + my)
+            box = (x0 - mx, y0 - my, x1 + mx, y1 + my)
 
             def near(pt, ref, radius):
                 return math.hypot(pt[0] - ref[0], pt[1] - ref[1]) <= radius * fw
@@ -83,15 +86,9 @@ class HandFaceTracker:
                     now["at_ear"] = True
                 if any(near(p, face_xy[e], EYE_RADIUS) for p in tips for e in EYE_CENTERS):
                     now["at_eyes"] = True
-                if any(near(p, face_xy[MOUTH_CENTER], MOUTH_RADIUS) for p in pts):
+                if any(near(p, face_xy[m], MOUTH_RADIUS) for p in pts for m in MOUTH_POINTS):
                     now["at_mouth"] = True
 
         if now["at_eyes"]:
             now["at_ear"] = False     # fingers at the eyes = rubbing them, not a phone at the ear
-        min_s = {"near_face": NEAR_FACE_MIN_S, "at_ear": AT_EAR_MIN_S,
-                 "at_eyes": AT_EYES_MIN_S, "at_mouth": AT_MOUTH_MIN_S}
-        out = {}
-        for k, active in now.items():
-            self.since[k] = (self.since[k] or t) if active else None
-            out["hand_" + k] = self.since[k] is not None and t - self.since[k] >= min_s[k]
-        return out
+        return {"hand_" + k: self.held[k].update(t, active) for k, active in now.items()}

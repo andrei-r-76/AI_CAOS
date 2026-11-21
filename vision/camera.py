@@ -1,4 +1,4 @@
-"""Webcam capture on a separate thread + camera health (covered / too dark).
+"""Webcam capture on a separate thread. (Camera health - covered / too dark - is in face_basic.py.)
 
 While the models run on one frame, the camera thread already reads the next one (higher FPS).
 """
@@ -7,18 +7,11 @@ import threading
 import time
 
 import cv2
-import numpy as np
 
 CAM_WIDTH, CAM_HEIGHT, CAM_FPS = 640, 480, 30   # TUNE: camera resolution / FPS
 CAM_DSHOW = True           # Windows: use DirectShow + MJPG (faster camera startup)
 CAM_FAIL_LIMIT = 30        # consecutive failed reads before the camera thread gives up
 CAM_REOPEN_TRIES = 5       # attempts to reopen a camera that stopped, before quitting
-
-# --- camera health ---
-BLOCKED_MEAN = 18          # TUNE: average brightness (0-255) below this = camera covered / black
-BLOCKED_STD = 6            # TUNE: or almost no contrast (uniform image) = camera covered / dirty
-LOW_LIGHT_MEAN = 60        # TUNE: average brightness below this = low light (turn on CLAHE)
-HEALTH_MIN_S = 1.0         # TUNE: a condition must last this long before it is reported
 
 
 def open_capture(index):
@@ -98,25 +91,3 @@ def reopen_camera(cap):
             return new
         new.release()
     return None
-
-
-class CameraHealth:
-    """Camera covered / dirty / too dark, from the brightness and contrast of a tiny gray copy."""
-
-    def __init__(self):
-        self.blocked_since = None
-        self.dark_since = None
-
-    def update(self, t, frame):
-        small = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (80, 60),
-                           interpolation=cv2.INTER_AREA)
-        mean, std = float(np.mean(small)), float(np.std(small))
-        blocked_now = mean < BLOCKED_MEAN or std < BLOCKED_STD
-        dark_now = mean < LOW_LIGHT_MEAN and not blocked_now
-        self.blocked_since = (self.blocked_since or t) if blocked_now else None
-        self.dark_since = (self.dark_since or t) if dark_now else None
-        return {
-            "brightness": round(mean, 1),
-            "camera_blocked": self.blocked_since is not None and t - self.blocked_since >= HEALTH_MIN_S,
-            "low_light": self.dark_since is not None and t - self.dark_since >= HEALTH_MIN_S,
-        }

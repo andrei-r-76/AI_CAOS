@@ -1,12 +1,10 @@
-"""Alert engine: turns the raw detections in the state into scores, counters, ONE alert level and an
+"""Alert engine: turns the raw detections in the state into counters, ONE alert level and an
 event log. This is what the LLM (R2) and the dashboard (R4) should react to.
 
   - alert_level:   none | info | warning | critical (the highest active alert)
   - alert_reason:  code of the most important active alert (see RULES), "" if none
   - active_alerts: all active alert codes, most important first
   - events:        the last EVENTS_MAX alerts that started, with time and level
-  - drowsiness_score / fatigue_level: combined fatigue (ok | tired | drowsy)
-  - attention_score: combined attention to the road (0-100)
 
 Call the LLM when alert_level or alert_reason changes, not on every state update.
 """
@@ -32,11 +30,7 @@ RULES = [
     ("driver_missing",   "critical", lambda s: s["face_lost_sec"] >= FACE_LOST_ALERT_S),
     ("phone_use",        "warning",  lambda s: s["phone_use"]),
     ("long_glance",      "warning",  lambda s: s["long_glance"]),
-    ("fatigue_high",     "warning",  lambda s: s["fatigue_level"] == "drowsy"),
-    ("fatigue_medium",   "info",     lambda s: s["fatigue_level"] == "tired"),
     ("head_nodding",     "warning",  lambda s: s["head_nods_1min"] >= NODS_WARN),
-    ("perclos",          "warning",  lambda s: s["perclos_drowsy"]),
-    ("hypnosis",         "warning",  lambda s: s["hypnosis"]),
     ("frequent_yawning", "warning",  lambda s: s["yawn_count_5min"] >= YAWNS_WARN),
     ("mirror_too_long",  "warning",  lambda s: s["mirror_too_long"]),
     ("camera_blocked",   "warning",  lambda s: s["camera_blocked"]),
@@ -76,7 +70,7 @@ class AlertEngine:
         self.counts = {}             # code -> how many times it started since launch
 
     def update(self, s, t):
-        """Adds counters, scores, alert_level / alert_reason / active_alerts / events to the state s."""
+        """Adds counters, alert_level / alert_reason / active_alerts / events to the state s."""
         s["phone_use"] = bool(s["phone_in_hand"] or s["phone_near_face"] or s["hand_at_ear"])
         s["yawn_count_5min"] = self.yawns.update(t, s["yawning"])
         s["microsleep_count_10min"] = self.micro.update(t, s["microsleep"] or s["sleep"])

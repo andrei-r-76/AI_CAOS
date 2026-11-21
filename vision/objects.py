@@ -13,6 +13,8 @@ stays high. Detections are then related to the driver's face and hands:
 import threading
 import time
 
+from hand_face import FACE_MARGIN   # one definition of "near the face" for hands AND objects
+
 try:
     from ultralytics import YOLO
 except Exception:              # not installed, or torch missing
@@ -26,7 +28,6 @@ OBJ_EVERY_S = 0.5          # TUNE: run YOLO at most this often (seconds). Lower 
 OBJ_THREADS = 1            # TUNE: CPU threads for YOLO. By default torch takes ALL cores and the face
                            #       detection FPS drops; 1-2 keeps MediaPipe fast
 OBJ_KEEP_S = 1.0           # TUNE: a detection stays valid this long (YOLO runs less often than the camera)
-FACE_MARGIN = 0.25         # face box expanded by this fraction for "near the face"
 MOUTH_MARGIN = 0.15        # cup/bottle box expanded by this fraction (of the face width) for "at the mouth"
 
 
@@ -94,18 +95,17 @@ def _overlap(a, b):
     return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
 
 
-def relate(dets, face_xy, hands_px):
-    """Relate detections to the driver's face (478 points or None) and hands (lists of (x, y))."""
+def relate(dets, face_xy, hands_px, face_box):
+    """Relate detections to the driver's face (478 points or None), its box (x0, y0, x1, y1, computed once
+    per frame in face_basic.py; None = no face) and hands (lists of (x, y))."""
     out = {"phone_detected": False, "phone_in_hand": False, "phone_near_face": False,
            "drinking": False, "objects": sorted({d[0] for d in dets})}
-    face_box = mouth = None
+    mouth = None
     fw = 0.0
-    if face_xy is not None:
-        xs = [p[0] for p in face_xy]
-        ys = [p[1] for p in face_xy]
-        fw, fh = max(xs) - min(xs), max(ys) - min(ys)
-        face_box = (min(xs) - fw * FACE_MARGIN, min(ys) - fh * FACE_MARGIN,
-                    max(xs) + fw * FACE_MARGIN, max(ys) + fh * FACE_MARGIN)
+    if face_xy is not None and face_box is not None:
+        x0, y0, x1, y1 = face_box
+        fw, fh = x1 - x0, y1 - y0
+        face_box = (x0 - fw * FACE_MARGIN, y0 - fh * FACE_MARGIN, x1 + fw * FACE_MARGIN, y1 + fh * FACE_MARGIN)
         mouth = face_xy[13]
     for label, _, x1, y1, x2, y2 in dets:
         box = (x1, y1, x2, y2)
