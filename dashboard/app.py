@@ -157,6 +157,9 @@ ALERT_SEVERITY = {"yawn": 1, "microsleep": 3, "phone": 3}
 def to_dashboard(s):
     """llm/state.json names -> the names the dashboard reads."""
     flags = []
+    eyerub = bool(s.get("eyerub") or s.get("hand_at_eyes"))
+    phone = bool(s.get("phone_detected") or s.get("hand_at_ear") or (s.get("hand_near_face") and not s.get("hand_at_eyes")))
+
     if not s.get("face_found", True):
         flags.append("noface")
     else:
@@ -166,9 +169,9 @@ def to_dashboard(s):
             flags.append("drowsy")
         if s.get("looking_away_sec", 0) >= 2 or s.get("vats_alert"):
             flags.append("distracted")
-        if s.get("hand_near_face"):
+        if phone:
             flags.append("phone")
-        if s.get("eyerub"):
+        if eyerub:
             flags.append("eyerub")
         if s.get("yawning"):
             flags.append("yawn")

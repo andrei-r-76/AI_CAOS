@@ -2,7 +2,7 @@ const $ = id => document.getElementById(id);
 const UI_LANG = document.body.dataset.lang === "ro" ? "ro-RO" : "en-US";
 
 const STATE = {
-  ok:     { label: "Alert",   sub: "Driver looks attentive." },
+  ok:     { label: "OK",   sub: "Driver looks attentive." },
   warn:   { label: "Warning", sub: "Signs of fatigue or distraction." },
   danger: { label: "Danger",  sub: "Immediate attention needed." },
 };
