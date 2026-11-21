@@ -359,13 +359,18 @@ def live():
         time.sleep(0.2)
         now = time.time()
         context["events"] = [e for e in context["events"] if e["until"] > now]   # expire old events
-        if now >= next_random:
-            typed.append(random.choice(list(EVENTS)))
-            next_random = now + random.uniform(*RANDOM_EVENT_SEC)
         while typed:
             name = typed.pop(0)
             print(f"[event] {name}")
             context["events"].append(make_event(name, now))
+            next_random = now + random.uniform(*RANDOM_EVENT_SEC)
+
+        if now >= next_random:
+            name = random.choice(list(EVENTS))
+            print(f"[event] {name}")
+            context["events"].append(make_event(name, now))
+            next_random = now + random.uniform(*RANDOM_EVENT_SEC)
+
 
         state = read_state() or {}                    # no vision running -> only events are judged
         actions = emergency(state)
