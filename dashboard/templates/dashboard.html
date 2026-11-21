@@ -14,19 +14,6 @@
     <label class="switch"><input type="checkbox" id="voice-toggle" checked> Car voice</label>
   </div>
 </header>
-
-<div id="demo" class="demo" hidden>
-  <button class="scen on" data-name="auto">Auto</button>
-  <button class="scen" data-name="normal">Normal</button>
-  <button class="scen" data-name="yawn">Yawning</button>
-  <button class="scen" data-name="drowsy">Drowsy</button>
-  <button class="scen" data-name="microsleep">Microsleep</button>
-  <button class="scen" data-name="distracted">Looking away</button>
-  <button class="scen" data-name="phone">Phone</button>
-  <button class="scen" data-name="eyerub">Eye rubbing</button>
-  <button class="scen" data-name="noface">No face</button>
-</div>
-
 <main class="layout-16-9">
   <!-- LEFT COLUMN: DRIVER STATUS, GUIDANCE & METRICS -->
   <section class="left-col">
@@ -144,7 +131,7 @@
     </div>
   </section>
 
-  <!-- RIGHT COLUMN: DETECTION LOG + VOICE/TEXT ALERTS -->
+  <!-- RIGHT COLUMN: DETECTION LOG + VOICE/TEXT DIALOGUE -->
   <section class="right-col">
     <div class="panel log-panel">
       <div class="panel-header">
@@ -168,13 +155,10 @@
     <!-- Assistant dialogue (read-only), under the log -->
     <div class="panel chat-panel">
       <div class="panel-header">
-        <h2>Assistant Messages</h2>
+        <h2>Assistant Help</h2>
       </div>
       <div id="chat" class="chat-list">
-        <div class="chat-row">
-          <span class="chat-meta">System</span>
-          <span class="chat-text">Assistant messages will appear here.</span>
-        </div>
+      </div>
       </div>
     </div>
   </section>

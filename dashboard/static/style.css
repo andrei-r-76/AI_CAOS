@@ -51,6 +51,21 @@ body {
   color: var(--text);
 }
 
+.live-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.dot.off { background: var(--danger); }
+.dot.amber { background: var(--warn); }
+
 .switch {
   display: flex;
   align-items: center;
@@ -453,3 +468,22 @@ td:nth-child(2) {
 
 /* last vehicle tile (cruise control) spans the full row */
 .tile-wide { grid-column: 1 / -1; }
+
+/* new log rows flash briefly so they are easy to spot */
+@keyframes row-flash {
+  from { background: #e5e7eb; }
+  to   { background: transparent; }
+}
+tr.new td { animation: row-flash 1.4s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  tr.new td { animation: none; }
+}
+
+/* variables behind an assistant message, shown under it in the log */
+.log-why {
+  margin-top: 4px;
+  font-size: 0.85rem;
+  font-weight: 400;
+  line-height: 1.35;
+  opacity: 0.7;
+}

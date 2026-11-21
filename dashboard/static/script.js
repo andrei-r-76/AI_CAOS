@@ -24,8 +24,6 @@ const NAMES = {
   noface: "Driver not visible"
 };
 
-const SEV = { 1: "Info", 2: "Warning", 3: "Danger" };
-
 const DELAYS = {
   afterCarSpeaks: 600,
   alertCooldown:  4000,
@@ -45,7 +43,7 @@ function pushSuggestion(text) {
 
 // Set to false once the LLM notifications cover spoken warnings, so the car does not
 // read the rule-based alert text AND the LLM message for the same situation.
-const RULE_BASED_VOICE = true;
+const RULE_BASED_VOICE = false;
 let lastAssistantSpeechAt = 0;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -53,8 +51,6 @@ let lastAlertSpeechAt = 0;
 
 // ---- live events ----
 const src = new EventSource("/events");
-src.onopen = () => { $("conn-light").className = "dot"; $("conn-text").textContent = "Live"; };
-src.onerror = () => { $("conn-light").className = "dot off"; $("conn-text").textContent = "Reconnecting…"; };
 src.onmessage = e => {
   const ev = JSON.parse(e.data);
   if (ev.type === "metrics") onMetrics(ev);
@@ -103,7 +99,6 @@ function onAlert(a) {
   $("s-alerts").textContent = stats.alerts;
   renderCounts();
   pushSuggestion(a.text);
-  addMsg("car", a.text);
   addLog(a.t, NAMES[a.kind] || a.kind, a.severity, a.text);
 
   const now = Date.now();
@@ -120,7 +115,6 @@ function onAction(a) {
   if (a.level < 2) return;
   const sev = a.level >= 3 ? 3 : 2;
   pushSuggestion(a.text);
-  addMsg("car", a.text);
   addLog(a.t, "Intervention (Level " + a.level + ")", sev, a.text);
 
   if (RULE_BASED_VOICE && (a.level === 2 || a.level === 4)) {
@@ -128,12 +122,20 @@ function onAction(a) {
   }
 }
 
+// What the copilot was reacting to (llm.py "trigger") -> text for the Detection column
+const TRIGGER_NAMES = {
+  drowsy: "Drowsiness", distracted: "Looking away", phone: "Phone use",
+  yawning: "Yawning", hypnosis: "Highway hypnosis", no_face: "Driver not visible",
+};
+const triggerLabel = t => TRIGGER_NAMES[t] || (t ? t.charAt(0).toUpperCase() + t.slice(1).replace(/_/g, " ") : "Situation");
+
 // LLM notification pushed by the server (no driver input needed):
-//   { type: "assistant", t, text, lang?, severity? }  severity 1 = info, 2 = warning, 3 = danger
+//   { type: "assistant", t, text, lang?, severity?, trigger?, why?: [..], reason? }  severity 1 = info, 2 = warning, 3 = danger
+//   trigger = what it reacts to, e.g. "phone", "drowsy" or an outside event like "pedestrian"
 function onAssistant(a) {
   const sev = a.severity || 2;
   addMsg("ai", a.text);
-  addLog(a.t || Date.now() / 1000, "Assistant", sev, a.text);
+  addLog(a.t || Date.now() / 1000, triggerLabel(a.trigger), sev, a.text, a.why, a.reason);
   pushSuggestion(a.text);
 
   const now = Date.now();
@@ -143,10 +145,14 @@ function onAssistant(a) {
   }
 }
 
-function addLog(t, what, sev, text) {
+function addLog(t, what, sev, text, why, reason) {
+  // optional second/third line under the message: the variables (and the model's reason) behind it
+  const detail =
+    (why && why.length ? `<div class="log-why">Based on: ${why.map(esc).join(" · ")}</div>` : "") +
+    (reason ? `<div class="log-why">Reason: ${esc(reason)}</div>` : "");
   $("log-body").insertAdjacentHTML(
     "afterbegin",
-    `<tr><td>${new Date(t * 1000).toLocaleTimeString()}</td><td>${esc(what)}</td><td class="sev-${sev}">${SEV[sev]}</td><td>${esc(text)}</td></tr>`
+    `<tr class="new"><td>${new Date(t * 1000).toLocaleTimeString()}</td><td>${esc(what)}</td><td class="sev-${sev}">${sev}</td><td>${esc(text)}${detail}</td></tr>`
   );
 }
 
@@ -166,7 +172,7 @@ function say(text, lang, onend) {
 // ---- helpers (plain-text chat matching log rows) ----
 function addMsg(who, text) {
   const chat = $("chat");
-  const sender = who === "ai" ? "Assistant" : "System";
+  const sender = "Assistant";
   chat.insertAdjacentHTML(
     "beforeend",
     `<div class="chat-row"><span class="chat-meta">${sender}</span><span class="chat-text">${esc(text)}</span></div>`
