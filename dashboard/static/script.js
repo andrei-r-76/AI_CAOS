@@ -19,7 +19,9 @@ const NAMES = {
   yawn: "Yawning",
   nod: "Head nodding",
   distracted: "Looking away",
-  phone: "Phone use"
+  phone: "Phone use",
+  eyerub: "Eye rubbing",
+  noface: "Driver not visible"
 };
 
 const SEV = { 1: "Info", 2: "Warning", 3: "Danger" };
@@ -43,9 +45,10 @@ src.onmessage = e => {
   if (ev.type === "metrics") onMetrics(ev);
   else if (ev.type === "alert") onAlert(ev);
   else if (ev.type === "action") onAction(ev);
+  else if (ev.type === "calibration") onCalibration(ev);
 };
 
-function onMetrics({ metrics: m, flags, state }) {
+function onMetrics({ metrics: m, flags, state, score, t, yawns, source }) {
   $("hero").className = "panel status-panel state-" + state;
   $("hero-state").textContent = STATE[state].label;
   $("hero-sub").textContent = flags.length ? flags.map(f => NAMES[f]).join(", ") : STATE[state].sub;
@@ -54,15 +57,38 @@ function onMetrics({ metrics: m, flags, state }) {
     $("suggestion-text").textContent = SUGGESTIONS[state];
   }
 
-  $("m-perclos").textContent = Math.round(m.perclos * 100) + "%";
-  $("m-ear").textContent = m.ear.toFixed(2);
-  $("m-phone").textContent = m.phone ? "Yes" : "No";
-  $("m-yaw").textContent = Math.round(m.yaw) + "°";
-  $("m-pitch").textContent = Math.round(m.pitch) + "°";
-  $("m-mar").textContent = m.mar.toFixed(2);
+  const noFace = m.face === false;
+  const f = (v, fn) => (noFace || v == null ? "—" : fn(v));
+  $("m-perclos").textContent = f(m.perclos, v => Math.round(v * 100) + "%");
+  $("m-ear").textContent = f(m.ear, v => v.toFixed(2));
+  $("m-phone").textContent = f(m.phone, v => (v ? "Yes" : "No"));
+  $("m-yaw").textContent = f(m.yaw, v => Math.round(v) + "°");
+  $("m-pitch").textContent = f(m.pitch, v => Math.round(v) + "°");
+  $("m-mar").textContent = f(m.mar, v => v.toFixed(2));
+
+  // session summary
+  stats.scoreSum += score; stats.scoreN++; stats.peak = Math.max(stats.peak, score);
+  if (stats.lastT != null) {
+    const dt = Math.min(t - stats.lastT, 2);
+    stats.totT += dt;
+    if (state === "ok") stats.okT += dt;
+  }
+  stats.lastT = t;
+  $("s-avg").textContent = Math.round(stats.scoreSum / stats.scoreN);
+  $("s-peak").textContent = stats.peak;
+  $("s-ok").textContent = stats.totT ? Math.round(100 * stats.okT / stats.totT) + "%" : "—";
+  $("s-blinks").textContent = m.blink_rate == null ? "—" : Math.round(m.blink_rate);
+  $("s-blinkms").textContent = m.blink_ms == null ? "—" : Math.round(m.blink_ms) + " ms";
+  $("s-yawns").textContent = yawns;
+  $("calib-text").textContent = source === "simulator" ? "Not needed (simulated driver)"
+    : m.baseline != null ? "Done. Your open-eye baseline: " + m.baseline.toFixed(2) : "Done";
 }
 
 function onAlert(a) {
+  stats.alerts++; stats.counts[a.kind] = (stats.counts[a.kind] || 0) + 1;
+  $("s-alerts").textContent = stats.alerts;
+  const cell = document.querySelector(`.det-grid [data-kind="${a.kind}"] b`);
+  if (cell) cell.textContent = stats.counts[a.kind];
   $("suggestion-text").textContent = a.text;
   addMsg("car", a.text);
   addLog(a.t, NAMES[a.kind] || a.kind, a.severity, a.text);
@@ -75,6 +101,8 @@ function onAlert(a) {
 }
 
 function onAction(a) {
+  stats.maxLevel = Math.max(stats.maxLevel, a.level);
+  $("s-level").textContent = stats.maxLevel;
   alarm(a.actions.includes("alarm"));
   if (a.level < 2) return;
   const sev = a.level >= 3 ? 3 : 2;
@@ -136,8 +164,8 @@ async function ensureMicPermission() {
     return true;
   } catch {
     micGranted = false;
-    setMic(false, "Mic blocked — allow microphone in browser address bar");
-    addMsg("car", "Microphone permission was blocked. Click the lock icon next to the URL bar and set Microphone to Allow.");
+    setMic(false, "Mic blocked, allow microphone to continue.");
+    addMsg("car", "Microphone permission was blocked.");
     return false;
   }
 }
@@ -250,3 +278,20 @@ document.querySelectorAll(".scen").forEach(b => b.onclick = () => {
   document.querySelectorAll(".scen").forEach(x => x.classList.toggle("on", x === b));
   fetch("/api/scenario", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: b.dataset.name }) });
 });
+// ---- session summary and calibration ----
+const stats = { start: Date.now(), alerts: 0, maxLevel: 0, scoreSum: 0, scoreN: 0, peak: 0, okT: 0, totT: 0, lastT: null, counts: {} };
+const pad = n => String(n).padStart(2, "0");
+setInterval(() => {
+  const s = Math.floor((Date.now() - stats.start) / 1000);
+  $("s-time").textContent = pad(Math.floor(s / 60)) + ":" + pad(s % 60);
+}, 1000);
+
+function onCalibration({ left, waiting }) {
+  $("calib-text").textContent = waiting
+    ? "Waiting for your face. Look at the camera."
+    : "Calibrating: " + Math.ceil(left) + " s. Eyes open, look ahead.";
+}
+$("recal-btn").onclick = () => {
+  $("calib-text").textContent = "Recalibration requested…";
+  fetch("/api/recalibrate", { method: "POST" });
+};

@@ -25,10 +25,11 @@
   <button class="scen" data-name="microsleep">Microsleep</button>
   <button class="scen" data-name="distracted">Looking away</button>
   <button class="scen" data-name="phone">Phone</button>
+  <button class="scen" data-name="eyerub">Eye rubbing</button>
+  <button class="scen" data-name="noface">No face</button>
 </div>
 
 <main class="layout-16-9">
-  <!-- LEFT COLUMN: DRIVER STATUS, GUIDANCE, METRICS & PLAIN-TEXT CHAT -->
   <section class="left-col">
     <!-- Driver Status & Guidance -->
     <div id="hero" class="panel status-panel state-ok">
@@ -101,6 +102,45 @@
 
   <!-- RIGHT COLUMN: WIDE, TALL DETECTION LOG -->
   <section class="right-col">
+    <div class="panel cam-panel">
+      <div class="panel-header"><h2>Camera</h2></div>
+      <div class="cam">
+        <div class="cam-empty">Camera feed appears when the detector is running</div>
+        <img id="cam" src="/video_feed" alt="">
+      </div>
+      <div class="calib">
+        <span class="field-label">Calibration</span>
+        <span id="calib-text">Waiting for data…</span>
+        <button id="recal-btn" class="ghost">Recalibrate</button>
+      </div>
+    </div>
+
+    <div class="panel summary-panel">
+      <div class="panel-header"><h2>Session summary</h2></div>
+      <div class="sum-grid">
+        <div><span>Session time</span><b id="s-time">00:00</b></div>
+        <div><span>Alerts</span><b id="s-alerts">0</b></div>
+        <div><span>Highest level</span><b id="s-level">0</b></div>
+        <div><span>Average fatigue</span><b id="s-avg">—</b></div>
+        <div><span>Peak fatigue</span><b id="s-peak">—</b></div>
+        <div><span>Time attentive</span><b id="s-ok">—</b></div>
+        <div><span>Blinks per minute</span><b id="s-blinks">—</b></div>
+        <div><span>Blink length</span><b id="s-blinkms">—</b></div>
+        <div><span>Yawns, last 5 min</span><b id="s-yawns">0</b></div>
+      </div>
+      <div class="sum-sub">Detections this session</div>
+      <div class="det-grid">
+        <div data-kind="yawn"><span>Yawning</span><b>0</b></div>
+        <div data-kind="drowsy"><span>Drowsiness</span><b>0</b></div>
+        <div data-kind="microsleep"><span>Microsleep</span><b>0</b></div>
+        <div data-kind="nod"><span>Head nodding</span><b>0</b></div>
+        <div data-kind="distracted"><span>Looking away</span><b>0</b></div>
+        <div data-kind="phone"><span>Phone use</span><b>0</b></div>
+        <div data-kind="eyerub"><span>Eye rubbing</span><b>0</b></div>
+        <div data-kind="noface"><span>Not visible</span><b>0</b></div>
+      </div>
+    </div>
+
     <div class="panel log-panel">
       <div class="panel-header">
         <h2>Detection &amp; Response Log</h2>
