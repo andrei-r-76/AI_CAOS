@@ -27,10 +27,8 @@ const NAMES = {
 const SEV = { 1: "Info", 2: "Warning", 3: "Danger" };
 
 const DELAYS = {
-  afterMicPrompt: 350,
   afterCarSpeaks: 600,
   alertCooldown:  4000,
-  micHoldTime:    400,
 };
 
 let suggestUntil = 0;          // keep the suggestion visible until this time (ms)
@@ -45,6 +43,11 @@ function pushSuggestion(text) {
   $("suggestion-text").textContent = text;
 }
 
+// Set to false once the LLM notifications cover spoken warnings, so the car does not
+// read the rule-based alert text AND the LLM message for the same situation.
+const RULE_BASED_VOICE = true;
+let lastAssistantSpeechAt = 0;
+
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let lastAlertSpeechAt = 0;
 
@@ -57,10 +60,10 @@ src.onmessage = e => {
   if (ev.type === "metrics") onMetrics(ev);
   else if (ev.type === "alert") onAlert(ev);
   else if (ev.type === "action") onAction(ev);
+  else if (ev.type === "assistant") onAssistant(ev);
 };
 
 function onMetrics({ metrics: m, flags, state, t, yawns, source, vehicle }) {
-  latest.driver = m; latest.state = state; latest.flags = flags;
   renderVehicle(vehicle);
   $("hero").className = "panel status-panel state-" + state;
   $("hero-state").textContent = STATE[state].label;
@@ -104,7 +107,7 @@ function onAlert(a) {
   addLog(a.t, NAMES[a.kind] || a.kind, a.severity, a.text);
 
   const now = Date.now();
-  if (a.severity >= 2 && (now - lastAlertSpeechAt) > DELAYS.alertCooldown) {
+  if (RULE_BASED_VOICE && a.severity >= 2 && (now - lastAlertSpeechAt) > DELAYS.alertCooldown) {
     lastAlertSpeechAt = now;
     say(a.text, a.lang);
   }
@@ -120,9 +123,22 @@ function onAction(a) {
   addMsg("car", a.text);
   addLog(a.t, "Intervention (Level " + a.level + ")", sev, a.text);
 
-  if (a.level === 2) {
-    say(a.text, a.lang, () => listen(DELAYS.afterCarSpeaks));
-  } else if (a.level === 4) {
+  if (RULE_BASED_VOICE && (a.level === 2 || a.level === 4)) {
+    say(a.text, a.lang);
+  }
+}
+
+// LLM notification pushed by the server (no driver input needed):
+//   { type: "assistant", t, text, lang?, severity? }  severity 1 = info, 2 = warning, 3 = danger
+function onAssistant(a) {
+  const sev = a.severity || 2;
+  addMsg("ai", a.text);
+  addLog(a.t || Date.now() / 1000, "Assistant", sev, a.text);
+  pushSuggestion(a.text);
+
+  const now = Date.now();
+  if (sev >= 2 && (now - lastAssistantSpeechAt) > DELAYS.alertCooldown) {
+    lastAssistantSpeechAt = now;
     say(a.text, a.lang);
   }
 }
@@ -136,7 +152,7 @@ function addLog(t, what, sev, text) {
 
 // ---- car voice (speech out) ----
 function say(text, lang, onend) {
-  if (!$("voice-toggle").checked || !("speechSynthesis" in window)) {
+  if (!text || !$("voice-toggle").checked || !("speechSynthesis" in window)) {
     if (onend) setTimeout(onend, DELAYS.afterCarSpeaks);
     return;
   }
@@ -147,118 +163,13 @@ function say(text, lang, onend) {
   speechSynthesis.speak(u);
 }
 
-// ---- talk to the car (speech in) ----
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null;
-let micGranted = false;
-let micBusy = false;
-
-function setMic(on, hintText) {
-  $("mic").classList.toggle("listening", on);
-  $("mic-hint").textContent = hintText || (on ? "Listening…" : "Tap or press Space to talk");
-}
-
-async function ensureMicPermission() {
-  if (micGranted) return true;
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    addMsg("car", "Microphone blocked. Open via http://localhost:5000.");
-    return false;
-  }
-  try {
-    setMic(false, "Requesting mic permission…");
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach(track => track.stop());
-    micGranted = true;
-    setMic(false, "Preparing microphone…");
-    await sleep(DELAYS.afterMicPrompt);
-    return true;
-  } catch {
-    micGranted = false;
-    setMic(false, "Mic blocked — allow microphone in browser address bar");
-    addMsg("car", "Microphone permission was blocked. Click the lock icon next to the URL bar and set Microphone to Allow.");
-    return false;
-  }
-}
-
-async function listen(initialDelayMs = 0) {
-  if (!SR) {
-    addMsg("car", "Voice input requires Microsoft Edge or Chrome.");
-    return;
-  }
-  if (rec || micBusy) return;
-  micBusy = true;
-
-  try {
-    if (initialDelayMs > 0) {
-      setMic(false, "Get ready to speak…");
-      await sleep(initialDelayMs);
-    }
-
-    const allowed = await ensureMicPermission();
-    if (!allowed) return;
-
-    speechSynthesis.cancel();
-    setMic(false, "Starting mic…");
-    await sleep(DELAYS.micHoldTime);
-
-    rec = new SR();
-    rec.lang = UI_LANG;
-    rec.interimResults = false;
-
-    rec.onstart = () => setMic(true, "Listening… speak now");
-    rec.onend = () => { rec = null; setMic(false); };
-    rec.onerror = e => {
-      rec = null;
-      setMic(false);
-      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-        micGranted = false;
-        addMsg("car", "Microphone blocked in browser permissions.");
-      } else if (!["no-speech", "aborted"].includes(e.error)) {
-        addMsg("car", "I couldn't hear you (" + e.error + ").");
-      }
-    };
-    rec.onresult = async e => {
-      const text = e.results[0][0].transcript;
-      addMsg("me", text);
-      await sleep(250);
-      try {
-        const r = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: text, context: { driver: latest.driver, vehicle: latest.vehicle, state: latest.state, flags: latest.flags } })
-        });
-        const reply = (await r.json()).reply;
-        addMsg("car", reply);
-        say(reply);
-      } catch {
-        addMsg("car", "Cannot reach the server.");
-      }
-    };
-
-    rec.start();
-  } catch {
-    rec = null;
-    setMic(false);
-  } finally {
-    micBusy = false;
-  }
-}
-
-$("mic").onclick = () => (rec ? rec.stop() : listen(0));
-document.addEventListener("keydown", e => {
-  if (e.code === "Space" && e.target === document.body) {
-    e.preventDefault();
-    rec ? rec.stop() : listen(0);
-  }
-});
-
 // ---- helpers (plain-text chat matching log rows) ----
 function addMsg(who, text) {
   const chat = $("chat");
-  const sender = who === "me" ? "Driver" : "System";
+  const sender = who === "ai" ? "Assistant" : "System";
   chat.insertAdjacentHTML(
     "beforeend",
-    `<div class="chat-row${who === "me" ? " me" : ""}"><span class="chat-meta">${sender}</span><span class="chat-text">${esc(text)}</span></div>`
+    `<div class="chat-row"><span class="chat-meta">${sender}</span><span class="chat-text">${esc(text)}</span></div>`
   );
   while (chat.children.length > 30) chat.firstChild.remove();
   chat.scrollTop = chat.scrollHeight;
@@ -322,7 +233,6 @@ document.querySelectorAll(".tab").forEach(btn => {
 // Reads `vehicle` from the "metrics" event:
 //   { speed_kmh, throttle (0..1), brake (0..1), hazard_lights, seat_vibration, wheel_vibration, cruise_control }
 // Missing values show "—".
-const latest = { driver: null, vehicle: null, state: null, flags: [] };
 const pct   = v => Math.round(v * 100) + "%";
 const onOff = v => (v ? "On" : "Off");
 const activeOff = v => (v ? "Active" : "Off");
@@ -336,7 +246,6 @@ const VEHICLE_FIELDS = [
   ["v-cruise",   "cruise_control",  onOff],
 ];
 function renderVehicle(v) {
-  latest.vehicle = v || null;
   VEHICLE_FIELDS.forEach(([id, key, fmt]) => {
     const val = v ? v[key] : null;
     $(id).textContent = val == null ? "—" : fmt(val);
