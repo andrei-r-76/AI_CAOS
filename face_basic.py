@@ -20,7 +20,6 @@ TUNING NOTE: every line marked "TUNE:" (here and in the modules) is a value you 
 Values computed at calibration (JAW_OPEN, EYE_OPEN_CLOSED, head pose on the road, gaze zones) are
 stored in calib.json. After changing JAW_K or EYE_OPEN_K, press `c` to recalibrate.
 """
-import csv           # for the optional debug log
 import json          # for state.json + calib.json
 import math
 import os
