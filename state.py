@@ -41,6 +41,7 @@ def new_state():
         "microsleep_count_10min": 0,  # microsleep episodes in the last 10 minutes
         "perclos": 0.0,               # 0..1, share of the last 60 s with the eyes closed (0 is normal when awake)
         "blink_rate": 0,              # blinks in the last minute
+        "squinting": False,  # eyelids narrowed (squint), not fully closed
 
         # --- head ---
         "head_yaw": 0.0,  # degrees, left/right relative to the calibrated road pose
