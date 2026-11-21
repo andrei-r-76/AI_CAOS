@@ -144,7 +144,7 @@ function setMic(on, hintText) {
 async function ensureMicPermission() {
   if (micGranted) return true;
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    addMsg("car", "Microphone blocked.");
+    addMsg("car", "Microphone blocked. Open via http://localhost:5000.");
     return false;
   }
   try {
@@ -157,7 +157,7 @@ async function ensureMicPermission() {
     return true;
   } catch {
     micGranted = false;
-    setMic(false, "Mic blocked — allow microphone in browser.");
+    setMic(false, "Mic blocked — allow microphone in browser address bar");
     addMsg("car", "Microphone permission was blocked. Click the lock icon next to the URL bar and set Microphone to Allow.");
     return false;
   }
@@ -241,7 +241,7 @@ function addMsg(who, text) {
   const sender = who === "me" ? "Driver" : "System";
   chat.insertAdjacentHTML(
     "beforeend",
-    `<div class="chat-row"><span class="chat-meta">${sender}</span><span class="chat-text">${esc(text)}</span></div>`
+    `<div class="chat-row${who === "me" ? " me" : ""}"><span class="chat-meta">${sender}</span><span class="chat-text">${esc(text)}</span></div>`
   );
   while (chat.children.length > 30) chat.firstChild.remove();
   chat.scrollTop = chat.scrollHeight;
@@ -282,7 +282,7 @@ function renderCounts() {
   $("c-yaw").textContent = `Looking away: ${n("distracted")} `;
   $("c-pitch").textContent = `Nodding: ${n("nod")} `;
   $("c-face").textContent = `Face not visible: ${n("noface")} `;
-  $("c-mar").textContent = `Yawning: ${n("yawn")} / ${stats.yawns5} in last 5 min`;
+  $("c-mar").textContent = `Yawning: ${n("yawn")}  / ${stats.yawns5} in last 5 min`;
   $("c-phone").textContent = `${n("phone")} `;
   $("c-alerts").textContent = `Highest level ${stats.maxLevel}`;
   $("s-ok").textContent = stats.totT ? Math.round(100 * stats.okT / stats.totT) + "%" : "—";

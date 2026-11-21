@@ -4,7 +4,7 @@
   --border: #d1d5db;
   --row-border: #e5e7eb;
   --text: #000000;
-  --primary: #0f4c81;
+  --primary: #000000;
   --primary-hover: #0a365c;
   --ok: #15803d;
   --warn: #b45309;
@@ -245,7 +245,7 @@ button:hover {
   display: flex;
   flex-direction: column;
   flex: 0 0 auto;
-  height: 200px;
+  height: 190px;
   overflow-y: auto;
 }
 
@@ -313,7 +313,7 @@ button:hover {
 .table-scroll {
   flex: 0 0 auto;   /* was flex: 1, which collapsed the height to 0 when the log is empty */
   overflow-y: auto;
-  height: 320px;
+  height: 270px;
   margin-top: 4px;
 }
 
@@ -399,3 +399,82 @@ td:nth-child(2) {
   font-size: 1.3rem;
   font-variant-numeric: tabular-nums;
 }
+
+/* --- COMPACT DRIVER STATUS: state on the left, suggestion on the right --- */
+.status-panel {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px 28px;
+  padding: 14px 20px;
+}
+.status-panel .status-title { font-size: 2rem; }
+.status-panel .status-sub { margin-top: 2px; font-size: 1rem; }
+.status-panel .guidance-box {
+  margin-top: 0;
+  padding: 0 0 0 24px;
+  border-top: none;
+  border-left: 1px solid var(--row-border);
+}
+.status-panel .guidance-box p { font-size: 1.05rem; line-height: 1.35; }
+
+/* --- DRIVER SUMMARY TILES --- */
+.tile-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 14px;
+}
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 84px;
+  padding: 10px 14px;
+  border: 1px solid var(--row-border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.tile-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.tile-val {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.7rem;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--primary);
+  overflow-wrap: anywhere;
+}
+#m-blinks { font-size: 1.15rem; }   /* "12/min, 150 ms" is longer than the others */
+.tile-sub {
+  margin-top: auto;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.tile-sub:empty { display: none; }
+
+@media (max-width: 1150px) {
+  .status-panel { grid-template-columns: 1fr; }
+  .status-panel .guidance-box { padding: 10px 0 0; border-left: none; border-top: 1px solid var(--row-border); }
+}
+
+/* tiles stretch to fill the summary panel so there is no empty gap at the bottom */
+.summary-panel { display: flex; flex-direction: column; }
+.tile-grid { flex: 1; grid-auto-rows: 1fr; }
+
+.tile { gap: 0; }
+.tile-val { margin-top: 14px; }
+
+
+
+/* driver messages sit on the right side of the dialogue box */
+.chat-row.me {
+  grid-template-columns: 1fr 95px;
+  text-align: right;
+}
+.chat-row.me .chat-meta { order: 2; }
+.chat-row.me .chat-text { order: 1; }

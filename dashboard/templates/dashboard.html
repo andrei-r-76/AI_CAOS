@@ -44,30 +44,71 @@
       </div>
     </div>
 
-    <!-- Driver summary: live values and session counts, by category -->
+    <!-- Driver summary: live values (big) and session counts (small), as tiles -->
     <div class="panel summary-panel">
       <div class="panel-header"><h2>Driver summary</h2></div>
-      <table class="summary-table">
-        <thead><tr><th>Measure</th><th>Now</th><th>This session</th></tr></thead>
-        <tbody>
-          <tr class="cat"><th colspan="3">Eyes</th></tr>
-          <tr><td>Eye openness </td><td id="m-ear">—</td><td></td></tr>
-          <tr><td>Eyes closed </td><td id="m-perclos">—</td><td id="c-perclos"></td></tr>
-          <tr><td>Blinks</td><td id="m-blinks">—</td><td></td></tr>
-          <tr><td>Eye rubbing</td><td id="m-eyerub">—</td><td id="c-eyerub"></td></tr>
-          <tr class="cat"><th colspan="3">Head and face</th></tr>
-          <tr><td>Yaw</td><td id="m-yaw">—</td><td id="c-yaw"></td></tr>
-          <tr><td>Pitch</td><td id="m-pitch">—</td><td id="c-pitch"></td></tr>
-          <tr><td>Face in view</td><td id="m-face">—</td><td id="c-face"></td></tr>
-          <tr class="cat"><th colspan="3">Mouth and hands</th></tr>
-          <tr><td>Mouth opening </td><td id="m-mar">—</td><td id="c-mar"></td></tr>
-          <tr><td>Phone in hand</td><td id="m-phone">—</td><td id="c-phone"></td></tr>
-          <tr class="cat"><th colspan="3">Session</th></tr>
-          <tr><td>Time attentive</td><td id="s-ok">—</td><td></td></tr>
-          <tr><td>Alerts</td><td id="s-alerts">0</td><td id="c-alerts"></td></tr>
-          <tr><td>Session time</td><td id="s-time">00:00</td><td></td></tr>
-        </tbody>
-      </table>
+      <div class="tile-grid">
+        <div class="tile">
+          <span class="tile-label">Eye openness</span>
+          <div class="tile-val" id="m-ear">—</div>
+
+        </div>
+        <div class="tile">
+          <span class="tile-label">Eyes closed</span>
+          <div class="tile-val" id="m-perclos">—</div>
+          <div class="tile-sub" id="c-perclos"></div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Blinks</span>
+          <div class="tile-val" id="m-blinks">—</div>
+
+        </div>
+        <div class="tile">
+          <span class="tile-label">Eye rubbing</span>
+          <div class="tile-val" id="m-eyerub">—</div>
+          <div class="tile-sub" id="c-eyerub"></div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Yaw</span>
+          <div class="tile-val" id="m-yaw">—</div>
+          <div class="tile-sub" id="c-yaw"></div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Pitch</span>
+          <div class="tile-val" id="m-pitch">—</div>
+          <div class="tile-sub" id="c-pitch"></div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Face in view</span>
+          <div class="tile-val" id="m-face">—</div>
+          <div class="tile-sub" id="c-face"></div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Mouth opening</span>
+          <div class="tile-val" id="m-mar">—</div>
+          <div class="tile-sub" id="c-mar"></div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Phone in hand</span>
+          <div class="tile-val" id="m-phone">—</div>
+          <div class="tile-sub" id="c-phone"></div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Alerts</span>
+          <div class="tile-val" id="s-alerts">0</div>
+          <div class="tile-sub" id="c-alerts"></div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Time attentive</span>
+          <div class="tile-val" id="s-ok">—</div>
+
+        </div>
+        <div class="tile">
+          <span class="tile-label">Session time</span>
+          <div class="tile-val" id="s-time">00:00</div>
+
+        </div>
+      </div>
     </div>
   </section>
 
