@@ -3,7 +3,7 @@
 Install:   uv pip install mediapipe opencv-python numpy
            uv pip install ultralytics        (optional: phone / bottle / cup detection)
 Run:       uv run python face_basic.py
-Keys:      q = quit   c = recalibrate   l = toggle CLAHE (low light)   m = toggle face mesh drawing
+Keys:      q = quit   c = recalibrate   m = toggle face mesh drawing   (CLAHE turns on by itself in low light)
 
 Modules (same folder):
   camera.py     camera thread + camera health (covered / dark)
@@ -103,11 +103,6 @@ STATE_EMIT_S = 0.2         # TUNE: how often state.json is written (seconds)
 PRINT_STATE = False        # TUNE: also print the state to the console (noisy, slightly slower)
 DRAW_MESH = True           # TUNE: draw all 478 face points (key m). Off = a few FPS more
 OBJECT_DETECTION = True    # TUNE: YOLO phone / bottle / cup (needs `ultralytics`; off = faster)
-DEBUG_LOG = True           # TUNE: write raw driver values for every frame to debug_log.csv (for tuning)
-DEBUG_LOG_FILE = "debug_log.csv"
-DEBUG_FIELDS = ["t", "fps", "open_r", "open_l", "eye_thr", "look_down", "closed", "jaw", "jaw_thr",
-                "yawning", "yaw", "pitch", "roll", "gaze_h", "gaze_v", "zone", "zone_dist",
-                "hand_near_face", "hand_at_ear", "phone", "alert_level", "alert_reason"]
 
 # --- FACE TRACKING (stable IDs, so the driver is never confused with a passenger) ---
 TRACK_MAX_JUMP = 0.25      # TUNE: max face-center move between frames (fraction of frame width) to keep the ID
@@ -119,8 +114,12 @@ HAND_DETECT_CONF = 0.6     # TUNE: lower (0.5) if hands are missed, higher if gh
 HAND_PRESENCE_CONF = 0.6   # TUNE
 HAND_TRACK_CONF = 0.6      # TUNE
 
-USE_CLAHE = True
 _clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+CLAHE_ON_BELOW = 90        # TUNE: image brightness (0-255) below this -> CLAHE turns on automatically
+CLAHE_OFF_ABOVE = 110      # TUNE: ...and turns off only above this (gap = no on/off flicker)
+_clahe_on = False          # current state, decided by enhance()
+_brightness = 0.0          # last measured brightness (shown on screen)
+
 
 HAND_CONNECTIONS = [(0, 1), (1, 2), (2, 3), (3, 4), (0, 5), (5, 6), (6, 7), (7, 8),
                     (5, 9), (9, 10), (10, 11), (11, 12), (9, 13), (13, 14), (14, 15),
@@ -134,7 +133,9 @@ WINDOW = "MediaPipe - sofer"
 def ensure(path, url):
     if not os.path.exists(path):
         print(f"Descarc {path} ...")
-        urllib.request.urlretrieve(url, path)
+        tmp = path + ".part"
+        urllib.request.urlretrieve(url, tmp)   # descarcă într-un fișier temporar
+        os.replace(tmp, path)                  # îl redenumește doar dacă descărcarea a reușit
         print("Gata.")
 
 
@@ -149,8 +150,15 @@ def next_ts():
 
 
 def enhance(frame):
-    """CLAHE on the L channel (LAB) - helps detection in low light."""
-    if not USE_CLAHE:
+    """CLAHE on the L channel (LAB) - turns on by itself in low light (with hysteresis)."""
+    global _clahe_on, _brightness
+    small = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (80, 60), interpolation=cv2.INTER_AREA)
+    _brightness = float(small.mean())
+    if _clahe_on and _brightness > CLAHE_OFF_ABOVE:
+        _clahe_on = False
+    elif not _clahe_on and _brightness < CLAHE_ON_BELOW:
+        _clahe_on = True
+    if not _clahe_on:
         return frame
     lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
@@ -177,6 +185,8 @@ def angle_diff(a, b):
 
 
 def circular_mean(deg_values):
+    if len(deg_values) == 0:
+        return 0.0
     rad = np.radians(deg_values)
     return math.degrees(math.atan2(np.mean(np.sin(rad)), np.mean(np.cos(rad))))
 
@@ -455,7 +465,7 @@ def put(frame, text, org, col, scale=0.5, thick=2):
 #  MAIN LOOP
 # ============================================================================
 def main():
-    global USE_CLAHE, DRAW_MESH
+    global DRAW_MESH
     ensure(FACE_MODEL, FACE_URL)
     ensure(HAND_MODEL, HAND_URL)
 
@@ -491,7 +501,7 @@ def main():
     gaze_tracker, blink_tracker, head_tracker = new_trackers()
     hand_tracker, health, alerts = HandFaceTracker(), CameraHealth(), AlertEngine()
 
-    print("Pornit. q = iesire, c = recalibrare, l = CLAHE, m = desen puncte fata.")
+    print("Started. q = quit, c = recalibrate, m = toggle face mesh.")
     t_start = time.time()
     t0, frames, fps = t_start, 0, 0.0
     last_emit = 0.0
@@ -501,13 +511,6 @@ def main():
     closed_frames = 0             # debounce of "both eyes below the threshold" (driver only)
     yawn_since = None
     prof = {}
-    dbg_file = dbg_writer = None
-    if DEBUG_LOG:
-        dbg_file = open(DEBUG_LOG_FILE, "w", newline="")
-        dbg_writer = csv.DictWriter(dbg_file, fieldnames=DEBUG_FIELDS)
-        dbg_writer.writeheader()
-        dbg_flush = t_start
-        print(f"Jurnal de debug: {os.path.abspath(DEBUG_LOG_FILE)}")
 
     def tick(name, start):
         """Smoothed per-stage timing in ms (shown at the bottom of the window)."""
@@ -578,7 +581,6 @@ def main():
         state.update(cam)
         gm = bm = None
         xy = None
-        dbg = {}
 
         # ---------- driver: full analysis ----------
         if driver is not None:
@@ -681,13 +683,6 @@ def main():
             put(frame, closure_txt, (x0, y1 + 20), eye_col)
             draw_gaze_panel(frame, gm, w - 206, 72)
 
-            dbg = {"open_r": round(op[0], 3) if op else "", "open_l": round(op[1], 3) if op else "",
-                   "eye_thr": round(thr, 3), "look_down": round(look_down_score, 3), "closed": int(closed),
-                   "jaw": round(jaw, 3) if jaw is not None else "", "jaw_thr": round(JAW_OPEN, 3),
-                   "yawning": int(yawning), "yaw": round(yaw_d, 1), "pitch": round(pitch_d, 1),
-                   "roll": round(roll_d, 1), "gaze_h": round(g[0], 3) if g else "",
-                   "gaze_v": round(g[1], 3) if g else "", "zone": zone, "zone_dist": round(zone_dist, 2)}
-
         state["face_lost_sec"] = 0.0 if driver is not None else round(now - last_face_seen, 1)
 
         # ---------- hands (relative to the driver's face) ----------
@@ -712,15 +707,6 @@ def main():
         # ---------- scores, alert level, events ----------
         alerts.update(state, now)
 
-        if dbg_writer is not None and driver is not None:
-            dbg_writer.writerow(dict(dbg, t=round(now - t_start, 3), fps=round(fps, 1),
-                                     hand_near_face=int(state["hand_near_face"]),
-                                     hand_at_ear=int(state["hand_at_ear"]), phone=int(state["phone_detected"]),
-                                     alert_level=state["alert_level"], alert_reason=state["alert_reason"]))
-            if now - dbg_flush > 1.0:             # flush once a second so the file can be read live
-                dbg_file.flush()
-                dbg_flush = now
-
         if now - last_emit > STATE_EMIT_S:
             write_state(state)
             if PRINT_STATE:
@@ -740,8 +726,9 @@ def main():
                    f"Pasageri {state['passenger_count']}", (10, 20), (255, 255, 255), 0.5)
         flags = [k for k in ("hand_near_face", "hand_at_ear", "hand_at_eyes", "phone_detected",
                              "camera_blocked", "low_light") if state[k]]
-        put(frame, f"CLAHE {'ON' if USE_CLAHE else 'OFF'}  YOLO {'ON' if detector.available else 'OFF'}  "
-                   + (" ".join(flags) if flags else "[c] calib [l] CLAHE [m] mesh [q] iesire"),
+        put(frame, f"CLAHE {'ON' if _clahe_on else 'OFF'} (lumina {_brightness:.0f})  "
+                   f"YOLO {'ON' if detector.available else 'OFF'}  "
+                   + (" ".join(flags) if flags else "[c] calib [m] mesh [q] iesire"),
             (10, 42), (200, 200, 200), 0.45, 1)
 
         frames += 1
@@ -759,14 +746,10 @@ def main():
             calibrate(cap, face)
             gaze_tracker, blink_tracker, head_tracker = new_trackers()
             closed_frames, yawn_since = 0, None
-        if key == ord("l"):
-            USE_CLAHE = not USE_CLAHE
         if key == ord("m"):
             DRAW_MESH = not DRAW_MESH
 
     detector.stop()
-    if dbg_file is not None:
-        dbg_file.close()
     cap.release()
     face.close()
     hands.close()
