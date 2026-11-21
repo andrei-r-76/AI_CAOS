@@ -30,7 +30,7 @@ frame.jpg
 *.tmp
 
 # Secrets (variants of .env)
-.env.*
+.env*
 !.env.example
 
 # Other model formats and recordings
@@ -50,3 +50,4 @@ build/
 # OS (Windows)
 Thumbs.db
 desktop.ini
+

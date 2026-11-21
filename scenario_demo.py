@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-from scenarios import EVENTS
+from dashboard.scenarios import EVENTS
 
 ALIASES = {
     "pedestrian": ("a pedestrian is crossing the road ahead",),
@@ -69,7 +69,7 @@ def report(text, preview_alert):
     if preview_alert and scenario == "lane_intrusion":
         print("Vehicle entering your lane.")
     elif preview_alert and scenario in EVENTS:
-        from llm import STATE_FILE, get_alert
+        from dashboard.llm import STATE_FILE, get_alert
 
         print(get_alert(recent_driver_state(STATE_FILE), event=scenario))
     return True
