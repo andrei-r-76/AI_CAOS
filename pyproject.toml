@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.11,<3.13"   # MediaPipe has no wheels for newer Python
 dependencies = [
     "mediapipe>=1.2.3",
+    "ollama>=0.6.3",
     "opencv-python",
+    "python-dotenv>=1.2.4",
 ]
 
 [tool.uv]
