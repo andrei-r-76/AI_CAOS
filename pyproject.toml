@@ -5,7 +5,9 @@ description = "AI driver-monitoring assistant (CodeLap Hackathon 2026, AI Drive)
 readme = "README.md"
 requires-python = ">=3.11,<3.13"   # MediaPipe has no wheels for newer Python
 dependencies = [
+    "flask>=3.1.3",
     "mediapipe>=1.2.3",
+    "numpy>=2.4.6",
     "ollama>=0.6.3",
     "opencv-python",
     "python-dotenv>=1.2.4",
