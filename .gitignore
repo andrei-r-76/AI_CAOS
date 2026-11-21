@@ -21,3 +21,4 @@ recordings/
 .idea/
 .DS_Store
 *_landmarker.task
+state.json
