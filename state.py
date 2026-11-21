@@ -13,4 +13,5 @@ def new_state():
         "perclos": 0.0,             # 0..1, share of the last 60 s with eyes closed
         "looking_away_sec": 0.0,    # seconds head turned away/down continuously
         "hand_near_face": False,    # phone-use proxy
+        "yawning": False,           # mouth wide open for a while (MAR in face_basic.py)
     }
