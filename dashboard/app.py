@@ -30,6 +30,7 @@ TICK_SEC = 0.2
 METRICS_SEC = 1.0
 ACTION_HOLD_SEC = 8            # how long copilot actions stay on in the simulated vehicle
 LEVEL_TO_SEVERITY = {"info": 1, "warning": 2, "critical": 3}
+USE_SIMULATOR = False       # True = fake driver when the camera is not running
 
 # ---------------------------------------------------------------- live stream (SSE)
 clients, clients_lock = [], threading.Lock()
@@ -209,6 +210,10 @@ def loop():
         time.sleep(TICK_SEC)
         now = time.time()
         real = read_state()
+        if real is None and not USE_SIMULATOR:
+            step_vehicle(now, now - last_t)     # keep the vehicle clock running
+            last_t = now
+            continue                            # no camera data: send nothing, show no fake values
         source = "camera" if real else "simulator"
         if source != last_source:
             print(f"[server] driver data from: {source}")
