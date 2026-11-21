@@ -20,3 +20,30 @@ recordings/
 .vscode/
 .idea/
 .DS_Store
+
+# Runtime files written by the detector
+state.json
+frame.jpg
+*.tmp
+
+# Secrets (variants of .env)
+.env.*
+!.env.example
+
+# Other model formats and recordings
+*.onnx
+*.tflite
+*.mp4
+*.avi
+
+# Python tooling
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+*.log
+
+# OS (Windows)
+Thumbs.db
+desktop.ini
