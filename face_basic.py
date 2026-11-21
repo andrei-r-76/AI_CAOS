@@ -240,12 +240,13 @@ def separation(open_vals, closed_vals):
 
 
 def write_state(state):
-    """Write state.json (plain write). If another process (OneDrive, the dashboard) locks the file for
-    a moment, this write is skipped; the next one comes STATE_EMIT_S later. Readers should retry on
-    an empty / half-written file."""
+    """Write state.json atomically: write a temp file, then swap it in, so readers never see a
+    half-written file. If another process locks state.json for a moment, this write is skipped."""
+    tmp = STATE_FILE + ".tmp"
     try:
-        with open(STATE_FILE, "w") as f:
+        with open(tmp, "w") as f:
             json.dump(public(state), f)
+        os.replace(tmp, STATE_FILE)     # swap is instant: the reader sees the old or the new file, never half
     except PermissionError:
         pass
 
@@ -271,6 +272,9 @@ def load_calib():
         ZONE_MODEL = gaze.ZoneModel(c["zones"])
     except (KeyError, ValueError, TypeError):
         print("calib.json corupt -> recalibrez.")
+        return False
+    except OSError as e:                      # file locked (antivirus, another program) or unreadable
+        print(f"Nu pot citi calib.json ({e}) -> recalibrez.")
         return False
     CALIBRATED = True
     print(f"Calibrare incarcata: ochi inchisi sub {EYE_OPEN_CLOSED:.2f}  jaw>{JAW_OPEN:.2f}  "
@@ -341,7 +345,11 @@ def _collect(cap, face, seconds, text, skip=0.0):
                     data["open"].extend(op)
         left = int(t_end - time.time()) + 1
         cv2.putText(frame, f"{text}  {left}s", (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
-        cv2.putText(frame, "q = anuleaza calibrarea", (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+        cv2.putText(frame, f"q = cancel calibration   samples: {len(data['yaw'])}", (20, 90),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+        if not res.face_landmarks:
+            cv2.putText(frame, "FACE NOT DETECTED - move into view", (20, 125),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         cv2.imshow(WINDOW, frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             return None
@@ -418,23 +426,30 @@ def calibrate(cap, face):
     zones = {gaze.ROAD_ZONE: (0.0, 0.0, h0, v0)}
     for name, _ in ZONE_POSES:
         z = got[name]
-        if not z["yaw"]:
-            print(f"ATENTIE: zona {name}: nicio fata detectata -> o sar.")
+        if len(z["yaw"]) < 10:
+            print(f"ATENTIE: zona {name}: doar {len(z['yaw'])} cadre cu fata -> o sar (apasa c si reia).")
             continue
         zy = angle_diff(circular_mean(z["yaw"]), YAW_BASE)
         zp = angle_diff(circular_mean(z["pitch"]), PITCH_BASE)
         zh, zv = med(z["gaze_h"], None), med(z["gaze_v"], None)
+        iris_ok = (zh is not None and zv is not None and abs(zy) <= YAW_EYES_MAX
+                   and 0.0 <= zh <= 1.0 and 0.0 <= zv <= 1.0)
+        if not iris_ok:
+            zh = zv = None      # head turned too far / iris out of range -> this zone uses the head only
         zones[name] = (zy, zp, zh, zv)
         print(f"  zona {name:16s} cap yaw {zy:+5.0f} pitch {zp:+5.0f}   iris "
               + (f"h{zh:.2f} v{zv:.2f}" if zh is not None else "-"))
     ZONE_MODEL = gaze.ZoneModel(zones)
     CALIBRATED = True
 
-    with open(CALIB_FILE, "w") as f:
-        json.dump({"version": CALIB_VERSION, "jaw_open": JAW_OPEN,
-                   "yaw_base": YAW_BASE, "pitch_base": PITCH_BASE, "roll_base": ROLL_BASE,
-                   "gaze_h0": h0, "gaze_v0": v0, "eye_open_closed": EYE_OPEN_CLOSED,
-                   "zones": ZONE_MODEL.to_json()}, f, indent=2)
+    try:
+        with open(CALIB_FILE, "w") as f:
+            json.dump({"version": CALIB_VERSION, "jaw_open": JAW_OPEN,
+                       "yaw_base": YAW_BASE, "pitch_base": PITCH_BASE, "roll_base": ROLL_BASE,
+                       "gaze_h0": h0, "gaze_v0": v0, "eye_open_closed": EYE_OPEN_CLOSED,
+                       "zones": ZONE_MODEL.to_json()}, f, indent=2)
+    except OSError as e:
+        print(f"ATENTIE: nu pot salva calib.json ({e}) - calibrarea e folosita doar in sesiunea asta.")
     print(f"Gata. ochi<{EYE_OPEN_CLOSED:.2f}  jaw>{JAW_OPEN:.2f}  "
           f"cap drept: yaw {YAW_BASE:+.0f} pitch {PITCH_BASE:+.0f} roll {ROLL_BASE:+.0f}\n")
 
@@ -447,14 +462,10 @@ def draw_gaze_panel(frame, gm, x, y):
     lines = [
         f"Privire: {gm['direction'] or 'pe drum'}",
         f"Ochi pe drum: {gm['on_road_ratio'] * 100:.0f}%",
-        f"VATS: {gm['vats_s']:.0f}s / {gm['vats_glances']} priviri" + ("  ALERTA" if gm["vats_alert"] else ""),
-        f"Oglinzi: {gm['mirror_checks']}",
-        f"Fixatie: {gm['fixation_s']:.0f}s" + ("  HIPNOZA" if gm["hypnosis"] else ""),
     ]
     cv2.rectangle(frame, (x - 6, y - 18), (x + 200, y + len(lines) * 18 - 4), (25, 25, 25), -1)
     for i, t in enumerate(lines):
-        col = (0, 200, 255) if ("ALERTA" in t or "HIPNOZA" in t) else (220, 220, 220)
-        cv2.putText(frame, t, (x, y + i * 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, col, 1)
+        cv2.putText(frame, t, (x, y + i * 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 220), 1)
 
 
 def put(frame, text, org, col, scale=0.5, thick=2):
@@ -722,8 +733,7 @@ def main():
                 (12, h - 67), (255, 255, 255), 0.6)
         cv2.rectangle(frame, (0, 0), (w, 50), (25, 25, 25), -1)
         put(frame, f"Somnolenta {state['drowsiness_score']} ({state['fatigue_level']})  "
-                   f"Atentie {state['attention_score']}  PERCLOS {state['perclos'] * 100:.0f}%  "
-                   f"Pasageri {state['passenger_count']}", (10, 20), (255, 255, 255), 0.5)
+                   f"Atentie {state['attention_score']}", (10, 20), (255, 255, 255), 0.5)
         flags = [k for k in ("hand_near_face", "hand_at_ear", "hand_at_eyes", "phone_detected",
                              "camera_blocked", "low_light") if state[k]]
         put(frame, f"CLAHE {'ON' if _clahe_on else 'OFF'} (lumina {_brightness:.0f})  "
