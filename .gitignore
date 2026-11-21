@@ -23,6 +23,9 @@ recordings/
 
 # Runtime files written by the detector
 state.json
+calib.json
+state.json.tmp
+*.csv
 frame.jpg
 *.tmp
 
