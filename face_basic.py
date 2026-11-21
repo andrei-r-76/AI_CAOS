@@ -38,7 +38,7 @@ from alerts import AlertEngine
 from camera import Camera, CameraHealth, reopen_camera
 from hand_face import HandFaceTracker
 from head import HeadTracker, head_angles
-from state import new_state
+from state import internal_state, public
 
 # --- models (downloaded automatically on first run) ---
 FACE_MODEL = "face_landmarker.task"
@@ -236,7 +236,7 @@ def write_state(state):
     an empty / half-written file."""
     try:
         with open(STATE_FILE, "w") as f:
-            json.dump(state, f)
+            json.dump(public(state), f)
     except PermissionError:
         pass
 
@@ -570,7 +570,7 @@ def main():
             cv2.rectangle(frame, (int(min(xs)), int(min(ys))), (int(max(xs)), int(max(ys))), PASSENGER_COLOR, 2)
             put(frame, "Pasager", (int(min(xs)), int(min(ys)) - 8), PASSENGER_COLOR, 0.6)
 
-        state = new_state()
+        state = internal_state()
         state["ts"] = round(now, 2)
         state["fps"] = round(fps, 1)
         state["calibrated"] = CALIBRATED
