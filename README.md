@@ -41,6 +41,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md): feature branches → `dev` → `main`.
 
 ## Git Infrastructure
 
+Ruleset to protect dev and main branches from deletion. Only allowed operations to dev and main are merges.
+delete_feature.yml workflow to delete old, unused feat/branches
+pr_routing.yml to restrict pull requests only from feat/ to dev, and from dev to main
+
 # Git Commands
 
 git status -sb                      # Current branch, local edits, ahead/behind, va arata inclusiv in file explorer-ul vscode
