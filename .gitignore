@@ -21,6 +21,7 @@ recordings/
 .idea/
 .DS_Store
 
-# state
+# Face recognition / calibration
 
 state.json
+calib.json
