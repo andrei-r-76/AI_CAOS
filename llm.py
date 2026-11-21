@@ -242,6 +242,13 @@ def decide(state, context, history, now=None):
 
     prompt = "\n".join([f"driver now: {found[1] if found else 'attentive'}",
                         history.summary(trigger, now), render(context)])
+    if keywords:   # tell the model the words is_ok() will check for (real words only, max 3)
+        words = set(re.findall(r"[a-z']+", fallback.lower()))           # e.g. "brak" is a stem, not a word
+        shown = ([k for k in keywords if k in words]
+                 or [k for k in keywords if len(k) > 3 and " " not in k] or list(keywords))[:3]
+        prompt += ("\nWrite the message directly to the driver, using \"you\" (never \"the driver\"). "
+                   f"Use at least one of these words in the message: {', '.join(shown)}. "
+                   "Do not invent distances, speeds or numbers.")
     decision = {"level": min_level, "message": fallback, "actions": {}, "reason": "fixed rule",
                 "trigger": trigger, "source": "fallback"}
     try:
