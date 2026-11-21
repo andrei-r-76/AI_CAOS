@@ -27,10 +27,10 @@ from llm import EVENTS, Copilot, emergency, make_event, read_state, warm_up
 
 app = Flask(__name__)
 TICK_SEC = 0.2
-USE_SIMULATOR = False
 METRICS_SEC = 1.0
 ACTION_HOLD_SEC = 8            # how long copilot actions stay on in the simulated vehicle
 LEVEL_TO_SEVERITY = {"info": 1, "warning": 2, "critical": 3}
+USE_SIMULATOR = False       # True = fake driver when the camera is not running
 
 # ---------------------------------------------------------------- live stream (SSE)
 clients, clients_lock = [], threading.Lock()
@@ -153,7 +153,7 @@ ALERT_TEXT = {"microsleep": "Eyes closed too long. Wake up!", "drowsy": "Signs o
               "phone": "Phone in hand while driving.", "eyerub": "Eye rubbing detected.",
               "noface": "Driver not visible."}
 ALERT_SEVERITY = {"yawn": 1, "microsleep": 3, "phone": 3}
-
+ALERT_LEVEL = {"none": 0, "ok": 0, "info": 1, "warning": 2, "critical": 3}
 
 def to_dashboard(s):
     """llm/state.json names -> the names the dashboard reads."""
@@ -177,10 +177,18 @@ def to_dashboard(s):
         if s.get("yawning"):
             flags.append("yawn")
     state = "danger" if {"microsleep", "phone"} & set(flags) else "warn" if flags else "ok"
-    metrics = {"ear": s.get("ear"), "perclos": s.get("perclos"), "blink_rate": s.get("blink_rate"),
-               "blink_ms": s.get("blink_ms"), "eyerub": bool(s.get("eyerub")), "yaw": s.get("yaw"),
-               "pitch": s.get("pitch"), "mar": s.get("mar"), "phone": bool(s.get("hand_near_face")),
-               "face": s.get("face_found", True)}
+    ear = s.get("ear")
+    if ear is None and s.get("eye_openness_pct") is not None:
+        ear = s["eye_openness_pct"] / 100                     # 100 -> 1.00
+    metrics = {"ear": ear, "perclos": s.get("perclos"), "blink_rate": s.get("blink_rate"),
+               "blink_ms": s.get("blink_ms") or (s.get("avg_blink_sec") or 0) * 1000,
+               "eyerub": bool(s.get("eyerub") or s.get("hand_at_eyes")),
+               "yaw": s.get("head_yaw") if s.get("head_yaw") is not None else s.get("yaw"),
+               "pitch": s.get("head_pitch") if s.get("head_pitch") is not None else s.get("pitch"),
+               "mar": s.get("mar"), "yawning": bool(s.get("yawning")),
+               "phone": bool(s.get("hand_near_face") or s.get("phone_use")),
+               "face": s.get("face_found", True),
+               "level": ALERT_LEVEL.get(s.get("alert_level"), 0)}
     return flags, state, metrics
 
 
@@ -196,7 +204,7 @@ def run_decision(copilot, state, context, busy):
             apply_actions(d["actions"], time.time())
             publish({"type": "assistant", "t": time.time(), "text": d["message"], "lang": "en",
                      "severity": LEVEL_TO_SEVERITY[d["level"]], "trigger": d.get("trigger")})
-            print(f"[{d['level']}] {d['message']}  action={d['action']}  ({d['source']}: {d['reason']})")
+            print(f"[{d['level']}] {d['message']}  actions={d['actions']}  ({d['source']}: {d['reason']})")
     except Exception as e:
         print(f"[server] decision failed: {type(e).__name__}: {e}")
     finally:
@@ -211,9 +219,9 @@ def loop():
         now = time.time()
         real = read_state()
         if real is None and not USE_SIMULATOR:
-            step_vehicle(now, now - last_t)
+            step_vehicle(now, now - last_t)     # keep the vehicle clock running
             last_t = now
-            continue
+            continue                            # no camera data: send nothing, show no fake values
         source = "camera" if real else "simulator"
         if source != last_source:
             print(f"[server] driver data from: {source}")
