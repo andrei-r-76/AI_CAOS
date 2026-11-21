@@ -59,6 +59,9 @@ src.onmessage = e => {
   else if (ev.type === "assistant") onAssistant(ev);
 };
 
+// number -> rounded degrees; anything missing or non-numeric -> "-"
+const deg = v => (v == null || Number.isNaN(Number(v))) ? "-" : Math.round(Number(v)) + "°";
+
 function onMetrics({ metrics: m, flags, state, t, yawns, source, vehicle }) {
   renderVehicle(vehicle);
   $("hero").className = "panel status-panel state-" + state;
@@ -71,16 +74,17 @@ function onMetrics({ metrics: m, flags, state, t, yawns, source, vehicle }) {
 
   // live values
   const noFace = m.face === false;
-  const f = (v, fn) => (noFace || v == null ? "—" : fn(v));
+  const f = (v, fn) => (noFace || v == null ? "-" : fn(v));
   const yn = v => (v ? "Yes" : "No");
   $("m-ear").textContent = f(m.ear, v => v.toFixed(2));
   $("m-perclos").textContent = f(m.perclos, v => Math.round(v * 100) + "%");
   $("m-blinks").textContent = f(m.blink_rate, v => Math.round(v) + "/min" + (m.blink_ms == null ? "" : ", " + Math.round(m.blink_ms) + " ms"));
   $("m-eyerub").textContent = f(m.eyerub, yn);
-  $("m-yaw").textContent = f(m.yaw, v => Math.round(v) + "°");
-  $("m-pitch").textContent = f(m.pitch, v => Math.round(v) + "°");
+  // yaw / pitch: also accept the raw detector names (head_yaw / head_pitch) if the server passes them through
+  $("m-yaw").textContent = noFace ? "-" : deg(m.yaw ?? m.head_yaw);
+  $("m-pitch").textContent = noFace ? "-" : deg(m.pitch ?? m.head_pitch);
   $("m-face").textContent = noFace ? "No" : "Yes";
-  $("m-mar").textContent = f(m.mar, v => v.toFixed(2));
+  $("m-mar").textContent = noFace ? "-" : (m.mar != null ? m.mar.toFixed(2) : (m.yawning ? "Open" : "Closed"));
   $("m-phone").textContent = f(m.phone, yn);
 
   // session statistics
@@ -91,6 +95,7 @@ function onMetrics({ metrics: m, flags, state, t, yawns, source, vehicle }) {
     if (state === "ok") stats.okT += dt;
   }
   stats.lastT = t;
+  if (m.level != null) stats.maxLevel = Math.max(stats.maxLevel, m.level);
   renderCounts();
 }
 
@@ -163,6 +168,13 @@ function say(text, lang, onend) {
     return;
   }
   const u = new SpeechSynthesisUtterance(text);
+  u.rate = 0.75;      // 0.1 to 10, normal = 1
+  u.pitch = 1.0;     // 0 to 2
+  u.volume = 1.0;    // 0 to 1
+  const voices = speechSynthesis.getVoices();
+  const v = voices.find(x => x.lang === u.lang && /Google|Microsoft|Natural/i.test(x.name)) || voices.find(x => x.lang === u.lang);
+  if (v) u.voice = v;
+
   u.lang = lang ? (lang === "ro" ? "ro-RO" : "en-US") : UI_LANG;
   if (onend) u.onend = () => setTimeout(onend, DELAYS.afterCarSpeaks);
   speechSynthesis.cancel();
@@ -219,7 +231,7 @@ function renderCounts() {
   $("c-mar").textContent = `Yawning: ${n("yawn")}  / ${stats.yawns5} in last 5 min`;
   $("c-phone").textContent = `${n("phone")} `;
   $("c-alerts").textContent = `Highest level: ${stats.maxLevel}`;
-  $("s-ok").textContent = stats.totT ? Math.round(100 * stats.okT / stats.totT) + "%" : "—";
+  $("s-ok").textContent = stats.totT ? Math.round(100 * stats.okT / stats.totT) + "%" : "-";
 }
 renderCounts();
 
@@ -238,7 +250,7 @@ document.querySelectorAll(".tab").forEach(btn => {
 // ---- vehicle summary ----
 // Reads `vehicle` from the "metrics" event:
 //   { speed_kmh, throttle (0..1), brake (0..1), hazard_lights, seat_vibration, wheel_vibration, cruise_control }
-// Missing values show "—".
+// Missing values show "-".
 const pct   = v => Math.round(v * 100) + "%";
 const onOff = v => (v ? "On" : "Off");
 const activeOff = v => (v ? "Active" : "Off");
@@ -254,6 +266,6 @@ const VEHICLE_FIELDS = [
 function renderVehicle(v) {
   VEHICLE_FIELDS.forEach(([id, key, fmt]) => {
     const val = v ? v[key] : null;
-    $(id).textContent = val == null ? "—" : fmt(val);
+    $(id).textContent = val == null ? "-" : fmt(val);
   });
 }
