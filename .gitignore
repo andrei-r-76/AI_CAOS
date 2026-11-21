@@ -21,9 +21,29 @@ recordings/
 .idea/
 .DS_Store
 
-# Face recognition / calibration
+# Runtime files written by the detector
+state.json
+frame.jpg
+*.tmp
 
-state.json
-calib.json
-*_landmarker.task
-state.json
+# Secrets (variants of .env)
+.env.*
+!.env.example
+
+# Other model formats and recordings
+*.onnx
+*.tflite
+*.mp4
+*.avi
+
+# Python tooling
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+*.log
+
+# OS (Windows)
+Thumbs.db
+desktop.ini

@@ -1,0 +1,503 @@
+:root {
+  --bg: #f3f4f6;
+  --surface: #ffffff;
+  --border: #d1d5db;
+  --row-border: #e5e7eb;
+  --text: #000000;
+  --primary: #000000;
+  --primary-hover: #0a365c;
+  --ok: #15803d;
+  --warn: #b45309;
+  --danger: #b91c1c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 16px;
+}
+
+/* --- TOP BAR --- */
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  max-width: 1760px;
+  margin: 0 auto;
+  padding: 18px 32px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text);
+}
+
+.top-right {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.live-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.dot.off { background: var(--danger); }
+.dot.amber { background: var(--warn); }
+
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--text);
+}
+.switch input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 0;
+  border-radius: 6px;
+  padding: 10px 18px;
+  background: var(--primary);
+  color: #ffffff;
+  font-weight: 600;
+}
+button:hover {
+  background: var(--primary-hover);
+}
+
+.ghost {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  font-size: 0.95rem;
+  padding: 8px 16px;
+}
+.ghost:hover {
+  background: var(--bg);
+}
+
+/* --- 16:9 WIDESCREEN TWO-COLUMN LAYOUT --- */
+.layout-16-9 {
+  display: grid;
+  grid-template-columns: 1.05fr 1.15fr;
+  gap: 28px;
+  max-width: 1760px;
+  margin: 0 auto;
+  padding: 24px 32px 36px;
+  align-items: stretch;
+}
+
+.left-col {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.right-col {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* --- UNIFORM WHITE PANELS --- */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 22px 24px;
+}
+
+/* --- DRIVER STATUS & GUIDANCE (NO LEFT STRIP, NO COLORED DIVS) --- */
+.field-label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.status-title {
+  font-size: 3rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--text);
+}
+.state-ok .status-title { color: var(--ok); }
+.state-warn .status-title { color: var(--warn); }
+.state-danger .status-title { color: var(--danger); }
+
+.status-sub {
+  margin-top: 6px;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.guidance-box {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--row-border);
+}
+.guidance-box p {
+  margin: 4px 0 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+/* --- METRICS GRID (NO OUTLINES OR BORDERS ON VALUES) --- */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.metric-card {
+  background: var(--surface);
+  border: none;
+  outline: none;
+  border-radius: 8px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.metric-label {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.metric-value {
+  font-variant-numeric: tabular-nums;
+  font-size: 2.25rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--text);
+  border: none;
+  outline: none;
+}
+
+.primary-val {
+  font-size: 2.45rem;
+  color: var(--primary);
+}
+
+/* --- SHARED PANEL HEADERS --- */
+.panel-header {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.panel-header h2 {
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* --- PLAIN-TEXT CHAT (MATCHES LOG TABLE) --- */
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 0 0 auto;   /* static size, does not grow */
+}
+
+/* left column: summary stretches so both columns end level at the bottom */
+.summary-panel {
+  flex: 1;
+}
+
+.chat-list {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  height: 190px;
+  overflow-y: auto;
+}
+
+.chat-row {
+  display: grid;
+  grid-template-columns: 95px 1fr;
+  gap: 12px;
+  padding: 11px 4px;
+  border-bottom: 1px solid var(--row-border);
+  background: transparent;
+  border-left: none;
+  outline: none;
+  font-size: 1rem;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+.chat-meta {
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.chat-text {
+  color: var(--text);
+}
+
+.mic-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--row-border);
+}
+
+.mic-btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  background: var(--primary);
+  color: #ffffff;
+}
+.mic-btn.listening {
+  background: var(--danger);
+}
+
+.mic-hint {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* --- RIGHT COLUMN: WIDE & TALL DETECTION LOG --- */
+.log-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;   /* static, shorter log */
+  min-height: 0;
+}
+
+.table-scroll {
+  flex: 0 0 auto;   /* was flex: 1, which collapsed the height to 0 when the log is empty */
+  overflow-y: auto;
+  height: 270px;
+  margin-top: 4px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  text-align: left;
+  padding: 13px 12px;
+  border-bottom: 1px solid var(--row-border);
+  color: var(--text);
+  font-size: 1rem;
+  vertical-align: top;
+}
+
+th {
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+}
+
+td:first-child {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+  white-space: nowrap;
+}
+
+td:nth-child(2) {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.sev-1 { font-weight: 400; }
+.sev-2 { font-weight: 700; }
+.sev-3 { font-weight: 700; text-transform: uppercase; }
+
+@media (max-width: 1150px) {
+  .layout-16-9 {
+    grid-template-columns: 1fr;
+  }
+  .log-panel {
+    min-height: 0;
+  }
+}
+/* --- SESSION SUMMARY --- */
+.sum-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px 20px;
+  padding: 16px 0;
+}
+.sum-grid span, .det-grid span {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+.sum-grid b {
+  font-size: 1.6rem;
+  font-variant-numeric: tabular-nums;
+}
+.sum-sub {
+  padding-top: 14px;
+  border-top: 1px solid var(--row-border);
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.det-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px 20px;
+  padding-top: 12px;
+}
+.det-grid b {
+  font-size: 1.3rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- COMPACT DRIVER STATUS: state on the left, suggestion on the right --- */
+.status-panel {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px 28px;
+  padding: 14px 20px;
+}
+.status-panel .status-title { font-size: 2rem; }
+.status-panel .status-sub { margin-top: 2px; font-size: 1rem; }
+.status-panel .guidance-box {
+  margin-top: 0;
+  padding: 0 0 0 24px;
+  border-top: none;
+  border-left: 1px solid var(--row-border);
+}
+.status-panel .guidance-box p { font-size: 1.05rem; line-height: 1.35; }
+
+/* --- DRIVER SUMMARY TILES --- */
+.tile-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 14px;
+}
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 84px;
+  padding: 10px 14px;
+  border: 1px solid var(--row-border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.tile-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.tile-val {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.7rem;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--primary);
+  overflow-wrap: anywhere;
+}
+#m-blinks { font-size: 1.15rem; }   /* "12/min, 150 ms" is longer than the others */
+.tile-sub {
+  margin-top: auto;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.tile-sub:empty { display: none; }
+
+@media (max-width: 1150px) {
+  .status-panel { grid-template-columns: 1fr; }
+  .status-panel .guidance-box { padding: 10px 0 0; border-left: none; border-top: 1px solid var(--row-border); }
+}
+
+/* tiles stretch to fill the summary panel so there is no empty gap at the bottom */
+.summary-panel { display: flex; flex-direction: column; }
+.tile-grid { flex: 1; grid-auto-rows: 1fr; }
+
+/* more space between a tile's label and its value */
+.tile { gap: 0; }
+.tile-val { margin-top: 14px; }
+
+/* driver messages sit on the right side of the dialogue box */
+.chat-row.me {
+  grid-template-columns: 1fr 95px;
+  text-align: right;
+}
+.chat-row.me .chat-meta { order: 2; }
+.chat-row.me .chat-text { order: 1; }
+
+/* --- SUMMARY TABS (Driver / Vehicle) --- */
+.tile-grid[hidden] { display: none; }
+.panel-header.tabs {
+  display: flex;
+  gap: 28px;
+  padding-bottom: 0;
+}
+.tab {
+  background: none;
+  color: var(--text);
+  border-radius: 0;
+  padding: 0 0 10px;
+  margin-bottom: -1px;               /* underline sits on the header's bottom border */
+  border-bottom: 3px solid transparent;
+  font-size: 1.3rem;
+  font-weight: 700;
+  opacity: 0.5;
+}
+.tab:hover { background: none; opacity: 0.85; }
+.tab.on { opacity: 1; border-bottom-color: var(--primary); }
+
+/* last vehicle tile (cruise control) spans the full row */
+.tile-wide { grid-column: 1 / -1; }
