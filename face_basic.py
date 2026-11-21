@@ -704,7 +704,7 @@ def main():
 
         # ---------- scores, alert level, events ----------
         alerts.update(state, now)
-
+        """
         if dbg_writer is not None and driver is not None:
             dbg_writer.writerow(dict(dbg, t=round(now - t_start, 3), fps=round(fps, 1),
                                      hand_near_face=int(state["hand_near_face"]),
@@ -713,7 +713,7 @@ def main():
             if now - dbg_flush > 1.0:             # flush once a second so the file can be read live
                 dbg_file.flush()
                 dbg_flush = now
-
+        """
         if now - last_emit > STATE_EMIT_S:
             write_state(state)
             if PRINT_STATE:
@@ -756,8 +756,8 @@ def main():
             DRAW_MESH = not DRAW_MESH
 
     detector.stop()
-    if dbg_file is not None:
-        dbg_file.close()
+    #if dbg_file is not None:
+    #    dbg_file.close()
     cap.release()
     face.close()
     hands.close()
