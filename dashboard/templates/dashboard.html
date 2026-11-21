@@ -35,10 +35,10 @@
     <div id="hero" class="panel status-panel state-ok">
       <div class="status-top">
         <span class="field-label">Driver Status</span>
-        <div class="status-title" id="hero-state">Alert</div>
+        <div class="status-title" id="hero-state">OK</div>
         <div class="status-sub" id="hero-sub">Driver looks attentive.</div>
       </div>
-      <div class="guidance-box">
+      <div class="guidance-box" id="guidance" hidden>
         <span class="field-label">Live Suggestion</span>
         <p id="suggestion-text">Attention level optimal. Keep your eyes on the road ahead.</p>
       </div>
@@ -53,47 +53,47 @@
       <div class="tile-grid" id="tab-driver" role="tabpanel" aria-labelledby="tab-btn-driver">
         <div class="tile">
           <span class="tile-label">Eye openness</span>
-          <div class="tile-val" id="m-ear">—</div>
+          <div class="tile-val" id="m-ear">-</div>
 
         </div>
         <div class="tile">
           <span class="tile-label">Eyes closed</span>
-          <div class="tile-val" id="m-perclos">—</div>
+          <div class="tile-val" id="m-perclos">-</div>
           <div class="tile-sub" id="c-perclos"></div>
         </div>
         <div class="tile">
           <span class="tile-label">Blinks</span>
-          <div class="tile-val" id="m-blinks">—</div>
+          <div class="tile-val" id="m-blinks">-</div>
 
         </div>
         <div class="tile">
           <span class="tile-label">Eye rubbing</span>
-          <div class="tile-val" id="m-eyerub">—</div>
+          <div class="tile-val" id="m-eyerub">-</div>
           <div class="tile-sub" id="c-eyerub"></div>
         </div>
         <div class="tile">
           <span class="tile-label">Yaw</span>
-          <div class="tile-val" id="m-yaw">—</div>
+          <div class="tile-val" id="m-yaw">-</div>
           <div class="tile-sub" id="c-yaw"></div>
         </div>
         <div class="tile">
           <span class="tile-label">Pitch</span>
-          <div class="tile-val" id="m-pitch">—</div>
+          <div class="tile-val" id="m-pitch">-</div>
           <div class="tile-sub" id="c-pitch"></div>
         </div>
         <div class="tile">
           <span class="tile-label">Face in view</span>
-          <div class="tile-val" id="m-face">—</div>
+          <div class="tile-val" id="m-face">-</div>
           <div class="tile-sub" id="c-face"></div>
         </div>
         <div class="tile">
           <span class="tile-label">Mouth opening</span>
-          <div class="tile-val" id="m-mar">—</div>
+          <div class="tile-val" id="m-mar">-</div>
           <div class="tile-sub" id="c-mar"></div>
         </div>
         <div class="tile">
           <span class="tile-label">Phone in hand</span>
-          <div class="tile-val" id="m-phone">—</div>
+          <div class="tile-val" id="m-phone">-</div>
           <div class="tile-sub" id="c-phone"></div>
         </div>
         <div class="tile">
@@ -103,7 +103,7 @@
         </div>
         <div class="tile">
           <span class="tile-label">Time attentive</span>
-          <div class="tile-val" id="s-ok">—</div>
+          <div class="tile-val" id="s-ok">-</div>
 
         </div>
         <div class="tile">
@@ -115,31 +115,31 @@
       <div class="tile-grid" id="tab-vehicle" role="tabpanel" aria-labelledby="tab-btn-vehicle" hidden>
         <div class="tile">
           <span class="tile-label">Speed</span>
-          <div class="tile-val" id="v-speed">—</div>
+          <div class="tile-val" id="v-speed">-</div>
         </div>
         <div class="tile">
           <span class="tile-label">Throttle</span>
-          <div class="tile-val" id="v-throttle">—</div>
+          <div class="tile-val" id="v-throttle">-</div>
         </div>
         <div class="tile">
           <span class="tile-label">Brake</span>
-          <div class="tile-val" id="v-brake">—</div>
+          <div class="tile-val" id="v-brake">-</div>
         </div>
         <div class="tile">
           <span class="tile-label">Hazard lights</span>
-          <div class="tile-val" id="v-hazard">—</div>
+          <div class="tile-val" id="v-hazard">-</div>
         </div>
         <div class="tile">
           <span class="tile-label">Seat vibration</span>
-          <div class="tile-val" id="v-seat">—</div>
+          <div class="tile-val" id="v-seat">-</div>
         </div>
         <div class="tile">
           <span class="tile-label">Wheel vibration</span>
-          <div class="tile-val" id="v-wheel">—</div>
+          <div class="tile-val" id="v-wheel">-</div>
         </div>
         <div class="tile tile-wide">
           <span class="tile-label">Cruise control</span>
-          <div class="tile-val" id="v-cruise">—</div>
+          <div class="tile-val" id="v-cruise">-</div>
         </div>
       </div>
     </div>

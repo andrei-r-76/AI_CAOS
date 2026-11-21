@@ -33,6 +33,18 @@ const DELAYS = {
   micHoldTime:    400,
 };
 
+let suggestUntil = 0;          // keep the suggestion visible until this time (ms)
+const SUGGEST_HOLD_MS = 8000;
+function showSuggestion(on) {
+  $("guidance").hidden = !on;
+  if (!on) $("suggestion-text").textContent = "";
+}
+function pushSuggestion(text) {
+  suggestUntil = Date.now() + SUGGEST_HOLD_MS;
+  showSuggestion(true);
+  $("suggestion-text").textContent = text;
+}
+
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let lastAlertSpeechAt = 0;
 
@@ -53,7 +65,10 @@ function onMetrics({ metrics: m, flags, state, t, yawns, source, vehicle }) {
   $("hero").className = "panel status-panel state-" + state;
   $("hero-state").textContent = STATE[state].label;
   $("hero-sub").textContent = flags.length ? flags.map(f => NAMES[f]).join(", ") : STATE[state].sub;
-  if (!flags.length) $("suggestion-text").textContent = SUGGESTIONS[state];
+  // Live Suggestion is only shown while there is a problem (or shortly after an alert/intervention)
+  const problem = state !== "ok" || flags.length > 0 || Date.now() < suggestUntil;
+  showSuggestion(problem);
+  if (problem && !$("suggestion-text").textContent) $("suggestion-text").textContent = SUGGESTIONS[state === "ok" ? "warn" : state];
 
   // live values
   const noFace = m.face === false;
@@ -84,7 +99,7 @@ function onAlert(a) {
   stats.alerts++; stats.counts[a.kind] = (stats.counts[a.kind] || 0) + 1;
   $("s-alerts").textContent = stats.alerts;
   renderCounts();
-  $("suggestion-text").textContent = a.text;
+  pushSuggestion(a.text);
   addMsg("car", a.text);
   addLog(a.t, NAMES[a.kind] || a.kind, a.severity, a.text);
 
@@ -101,7 +116,7 @@ function onAction(a) {
   alarm(a.actions.includes("alarm"));
   if (a.level < 2) return;
   const sev = a.level >= 3 ? 3 : 2;
-  $("suggestion-text").textContent = a.text;
+  pushSuggestion(a.text);
   addMsg("car", a.text);
   addLog(a.t, "Intervention (Level " + a.level + ")", sev, a.text);
 
