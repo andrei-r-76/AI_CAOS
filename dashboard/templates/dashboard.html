@@ -12,6 +12,7 @@
   <h1>Driver Monitoring System</h1>
   <div class="top-right">
     <label class="switch"><input type="checkbox" id="voice-toggle" checked> Car voice</label>
+    <label class="switch"><input type="checkbox" id="alarm-toggle" checked> Alarm sound</label>
   </div>
 </header>
 <main class="layout-16-9">
@@ -21,7 +22,7 @@
     <div id="hero" class="panel status-panel state-ok">
       <div class="status-top">
         <span class="field-label">Driver Status</span>
-        <div class="status-title" id="hero-state">Alert</div>
+        <div class="status-title" id="hero-state">OK</div>
         <div class="status-sub" id="hero-sub">Driver looks attentive.</div>
       </div>
       <div class="guidance-box" id="guidance" hidden>
@@ -145,6 +146,7 @@
               <th>Detection</th>
               <th>Severity</th>
               <th>System Response</th>
+              <th>Car actions</th>
             </tr>
           </thead>
           <tbody id="log-body"></tbody>
@@ -152,15 +154,6 @@
       </div>
     </div>
 
-    <!-- Assistant dialogue (read-only), under the log -->
-    <div class="panel chat-panel">
-      <div class="panel-header">
-        <h2>Assistant Help</h2>
-      </div>
-      <div id="chat" class="chat-list">
-      </div>
-      </div>
-    </div>
   </section>
 </main>
 

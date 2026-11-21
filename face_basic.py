@@ -95,6 +95,7 @@ YAW_BASE = PITCH_BASE = ROLL_BASE = 0.0
 GAZE_CAL = gaze.GazeCalib()
 ZONE_MODEL = gaze.ZoneModel.default()
 EYE_OPEN_CLOSED = gaze.EYE_OPEN_CLOSED
+EYE_OPEN_REF, EYE_CLOSED_REF = 0.90, 0.15   # openness of this driver with eyes fully open / closed (set at calibration)
 CALIBRATED = False
 
 # --- SPEED / OUTPUT ---
@@ -245,7 +246,7 @@ def write_state(state):
 #  CALIBRATION
 # ============================================================================
 def load_calib():
-    global JAW_OPEN, YAW_BASE, PITCH_BASE, ROLL_BASE, GAZE_CAL, EYE_OPEN_CLOSED, ZONE_MODEL, CALIBRATED
+    global JAW_OPEN, YAW_BASE, PITCH_BASE, ROLL_BASE, GAZE_CAL, EYE_OPEN_CLOSED, ZONE_MODEL, CALIBRATED, EYE_OPEN_REF, EYE_CLOSED_REF
     if not os.path.exists(CALIB_FILE):
         return False
     try:
@@ -260,6 +261,9 @@ def load_calib():
         GAZE_CAL = gaze.GazeCalib(c["gaze_h0"], c["gaze_v0"])
         EYE_OPEN_CLOSED = c["eye_open_closed"]
         ZONE_MODEL = gaze.ZoneModel(c["zones"])
+        EYE_OPEN_CLOSED = c["eye_open_closed"]
+        EYE_OPEN_REF = c.get("eye_open_ref", EYE_OPEN_REF)
+        EYE_CLOSED_REF = c.get("eye_closed_ref", EYE_CLOSED_REF)
     except (KeyError, ValueError, TypeError):
         print("calib.json corupt -> recalibrez.")
         return False
@@ -347,7 +351,7 @@ def calibrate(cap, face):
     yaw/pitch + iris position, so it works whether the driver turns the head or only the eyes.
     Each pose starts with a PREP_SECONDS pause and a beep. q = cancel at any time.
     """
-    global JAW_OPEN, YAW_BASE, PITCH_BASE, ROLL_BASE, GAZE_CAL, EYE_OPEN_CLOSED, ZONE_MODEL, CALIBRATED
+    global JAW_OPEN, YAW_BASE, PITCH_BASE, ROLL_BASE, GAZE_CAL, EYE_OPEN_CLOSED, ZONE_MODEL, CALIBRATED, EYE_OPEN_REF, EYE_CLOSED_REF
     print("\n=== SCANARE COMPLETA ===")
     n_steps = len(ZONE_POSES) + 2
     poses = [("front", CALIB_SECONDS, f"1/{n_steps} PRIVESTE DRUMUL (drept), ochii deschisi, gura inchisa")]
@@ -395,6 +399,7 @@ def calibrate(cap, face):
     sep = separation(front["open"], closed["open"])
     if sep is not None and sep > 0:
         open_med, closed_med = med(front["open"], 0.9), med(closed["open"], 0.15)
+        EYE_OPEN_REF, EYE_CLOSED_REF = open_med, closed_med
         EYE_OPEN_CLOSED = float(np.clip(closed_med + EYE_OPEN_K * (open_med - closed_med),
                                         EYE_OPEN_MIN, EYE_OPEN_MAX))
         print(f"Deschidere ochi: deschis {open_med:.2f}  inchis {closed_med:.2f}  "
@@ -501,6 +506,7 @@ def main():
     last_face_seen = t_start      # for face_lost_sec
     closed_frames = 0             # debounce of "both eyes below the threshold" (driver only)
     yawn_since = None
+    eye_pct = None
     prof = {}
 
     def tick(name, start):
@@ -612,6 +618,12 @@ def main():
             closed = closed_frames >= need
             openness = (op[0] + op[1]) / 2 if op is not None else None
 
+            # eye openness as % of this driver's range: 0 = fully closed, 100 = fully open (smoothed)
+            if openness is not None and not eyes_hidden and EYE_OPEN_REF > EYE_CLOSED_REF:
+                raw = 100.0 * (openness - EYE_CLOSED_REF) / (EYE_OPEN_REF - EYE_CLOSED_REF)
+                raw = max(0.0, min(100.0, raw))
+                eye_pct = raw if eye_pct is None else 0.6 * eye_pct + 0.4 * raw
+
             # gaze zone (head + eyes; head only while the eyes are closed)
             g = gaze.gaze_ratios(xy)
             zone, zone_dist = ZONE_MODEL.classify(yaw_d, pitch_d, g if (g and not closed) else None)
@@ -633,6 +645,7 @@ def main():
 
             state.update({
                 "eyes_closed_sec": round(bm["closed_sec"], 1),
+                "eye_openness_pct": int(round(eye_pct)) if eye_pct is not None else 100,
                 "since_last_blink_sec": round(bm["since_last_blink"], 1),
                 "one_eye_closed": one_eye,
                 "yawning": yawning,
@@ -706,14 +719,6 @@ def main():
         # ---------- scores, alert level, events ----------
         alerts.update(state, now)
 
-        if dbg_writer is not None and driver is not None:
-            dbg_writer.writerow(dict(dbg, t=round(now - t_start, 3), fps=round(fps, 1),
-                                     hand_near_face=int(state["hand_near_face"]),
-                                     hand_at_ear=int(state["hand_at_ear"]), phone=int(state["phone_detected"]),
-                                     alert_level=state["alert_level"], alert_reason=state["alert_reason"]))
-            if now - dbg_flush > 1.0:             # flush once a second so the file can be read live
-                dbg_file.flush()
-                dbg_flush = now
 
         if now - last_emit > STATE_EMIT_S:
             write_state(state)
@@ -757,12 +762,7 @@ def main():
             DRAW_MESH = not DRAW_MESH
 
     detector.stop()
-    if dbg_file is not None:
-        dbg_file.close()
-    cap.release()
-    face.close()
-    hands.close()
-    cv2.destroyAllWindows()
+
 
 
 if __name__ == "__main__":
