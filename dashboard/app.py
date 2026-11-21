@@ -128,23 +128,89 @@ def trigger_event(name):
 DEFAULT_VEHICLE = {"speed_kmh": 100.0, "throttle": 0.3, "brake": 0.0, "hazard_lights": False,
                    "seat_vibration": False, "wheel_vibration": False, "cruise_control": True}
 vehicle = dict(DEFAULT_VEHICLE)
+vehicle["throttle"] = 0.0          # starts locked at 0 until the driver's face has been seen (see below)
 action_until = {}
+
+# --- throttle / brake behaviour (times in seconds) ---
+THROTTLE_DOWN_PER_S = 0.03    # lifting off is quick: full throttle released in about 1 s
+THROTTLE_UP_PER_S = 0.06       # accelerating again is slow: 0 -> 0.3 takes about 5 s
+BRAKE_UP_PER_S = 0.08           # brake builds up gradually (0 -> AUTO_BRAKE in 1 s)
+BRAKE_DOWN_PER_S = 1.0         # and is released a bit faster
+AUTO_BRAKE = 0.5               # brake level applied automatically while the driver's face is missing
+BRAKE_AFTER_FACE_LOSS_S = 10.0 # the automatic brake starts only after the driver has been out of frame this long
+COAST_DECEL_KMH_S = 2.0        # slowing down with no throttle and no brake (engine braking / drag), km/h per second
+FACE_LOSS_GRACE_S = 5.0        # a face missing for less than this cuts nothing (tracking flicker); after it the throttle locks at 0
+REARM_DELAY_S = 5.0            # after the face is back, wait this long before the throttle may rise again
+
+thr = {"lost_since": None, "back_since": None, "locked": True, "braking": False}   # locked: throttle held at 0
+commanded = {}                 # throttle / brake requested by assistant actions (ramped to, never jumped to)
 
 
 def apply_actions(actions, now):
     for name, value in actions.items():
-        vehicle[name] = value
+        if name in ("throttle", "brake"):
+            commanded[name] = value                # step_vehicle ramps toward it
+        else:
+            vehicle[name] = value
         action_until[name] = now + ACTION_HOLD_SEC
 
 
-def step_vehicle(now, dt):
+def _ramp(value, target, up, down, dt):
+    rate = up if target > value else down
+    return value + max(-rate * dt, min(rate * dt, target - value))
+
+
+def step_vehicle(now, dt, face_ok):
     for name in [n for n, t in action_until.items() if now > t]:     # actions wear off
-        vehicle[name] = DEFAULT_VEHICLE[name]
+        if name in ("throttle", "brake"):
+            commanded.pop(name, None)
+        else:
+            vehicle[name] = DEFAULT_VEHICLE[name]
         del action_until[name]
+
+    # lock logic: no face -> throttle locked at 0; it unlocks only after the face has been back for REARM_DELAY_S
+    if not face_ok:
+        if thr["lost_since"] is None:
+            thr["lost_since"] = now
+        if now - thr["lost_since"] >= FACE_LOSS_GRACE_S:
+            thr["locked"] = True
+        thr["back_since"] = None
+    else:
+        thr["lost_since"] = None
+        if thr["locked"]:
+            if thr["back_since"] is None:
+                thr["back_since"] = now
+            if now - thr["back_since"] >= REARM_DELAY_S:
+                thr["locked"] = False
+
+    # driver out of frame for BRAKE_AFTER_FACE_LOSS_S: the car brakes by itself and the hazard lights come on
+    braking_for_face = (not face_ok) and thr["lost_since"] is not None \
+                       and now - thr["lost_since"] >= BRAKE_AFTER_FACE_LOSS_S
+    if braking_for_face != thr["braking"]:
+        thr["braking"] = braking_for_face
+        print("[vehicle] driver missing -> automatic braking ON" if braking_for_face
+              else "[vehicle] driver back -> automatic braking OFF")
+    brake_target = max(commanded.get("brake", 0.0), AUTO_BRAKE if braking_for_face else 0.0)
+    vehicle["brake"] = max(0.0, min(1.0, _ramp(vehicle["brake"], brake_target, BRAKE_UP_PER_S, BRAKE_DOWN_PER_S, dt)))
+    if braking_for_face:
+        vehicle["hazard_lights"] = True
+    elif "hazard_lights" not in action_until:
+        vehicle["hazard_lights"] = DEFAULT_VEHICLE["hazard_lights"]
+
+    # throttle target: 0 while locked; otherwise it shrinks as the brake grows (brake 100% -> throttle 0)
+    desired = commanded.get("throttle", DEFAULT_VEHICLE["throttle"])
+    target = 0.0 if thr["locked"] else desired * (1.0 - min(1.0, vehicle["brake"]))
+    vehicle["throttle"] = max(0.0, _ramp(vehicle["throttle"], target, THROTTLE_UP_PER_S, THROTTLE_DOWN_PER_S, dt))
+
+    # speed: the brake slows the car; otherwise it follows the throttle (no throttle = coasting down)
     if vehicle["brake"] > 0:
         vehicle["speed_kmh"] = max(0.0, vehicle["speed_kmh"] - vehicle["brake"] * 25 * dt)
     else:
-        vehicle["speed_kmh"] += (DEFAULT_VEHICLE["speed_kmh"] - vehicle["speed_kmh"]) * 0.1 * dt
+        cruise = DEFAULT_VEHICLE["speed_kmh"] * vehicle["throttle"] / DEFAULT_VEHICLE["throttle"]
+        if cruise >= vehicle["speed_kmh"]:           # accelerating towards the speed the throttle asks for
+            vehicle["speed_kmh"] += (cruise - vehicle["speed_kmh"]) * 0.1 * dt
+        else:                                        # throttle released: slow coasting, not an instant slowdown
+            vehicle["speed_kmh"] = max(cruise, vehicle["speed_kmh"] - COAST_DECEL_KMH_S * dt)
 
 
 # ---------------------------------------------------------------- state -> dashboard events
@@ -178,10 +244,10 @@ def to_dashboard(s):
             flags.append("yawn")
     state = "danger" if {"microsleep", "phone"} & set(flags) else "warn" if flags else "ok"
     ear = s.get("ear")
-    if ear is None and s.get("eye_openness_pct") is not None:
-        ear = s["eye_openness_pct"] / 100                     # 100 -> 1.00
-    metrics = {"ear": ear, "perclos": s.get("perclos"), "blink_rate": s.get("blink_rate"),
+
+    metrics = {"ear": s.get("eyes_closed_sec"), "perclos": s.get("perclos"), "blink_rate": s.get("blink_rate"),
                "blink_ms": s.get("blink_ms") or (s.get("avg_blink_sec") or 0) * 1000,
+               "squint": bool(s.get("squinting") or s.get("eyes_partially_closed")),
                "eyerub": bool(s.get("eyerub") or s.get("hand_at_eyes")),
                "yaw": s.get("head_yaw") if s.get("head_yaw") is not None else s.get("yaw"),
                "pitch": s.get("head_pitch") if s.get("head_pitch") is not None else s.get("pitch"),
@@ -219,16 +285,22 @@ def loop():
         now = time.time()
         real = read_state()
         if real is None and not USE_SIMULATOR:
-            step_vehicle(now, now - last_t)     # keep the vehicle clock running
+            step_vehicle(now, now - last_t, False)   # no camera data = no face: throttle locked, car brakes
             last_t = now
-            continue                            # no camera data: send nothing, show no fake values
+            if now - last_metrics >= METRICS_SEC:    # the dashboard must still see the vehicle react
+                last_metrics = now
+                flags, level, metrics = to_dashboard({"face_found": False})
+                publish({"type": "metrics", "t": now, "state": level, "flags": flags, "metrics": metrics,
+                         "yawns": len(yawn_times), "source": "none",
+                         "vehicle": {k: (round(v, 2) if isinstance(v, float) else v) for k, v in vehicle.items()}})
+            continue
         source = "camera" if real else "simulator"
         if source != last_source:
             print(f"[server] driver data from: {source}")
             last_source = source
         state = real or sim_state(now)
 
-        step_vehicle(now, now - last_t)
+        step_vehicle(now, now - last_t, bool(state.get("face_found", False)))
         last_t = now
         urgent = emergency(state)                       # instant, independent of the LLM
         if urgent:
@@ -248,7 +320,7 @@ def loop():
             yawn_times[:] = [t for t in yawn_times if now - t < 300]
             publish({"type": "metrics", "t": now, "state": level, "flags": flags, "metrics": metrics,
                      "yawns": len(yawn_times), "source": source,
-                     "vehicle": {k: (round(v, 1) if isinstance(v, float) else v) for k, v in vehicle.items()}})
+                     "vehicle": {k: (round(v, 2) if isinstance(v, float) else v) for k, v in vehicle.items()}})
 
         outside_events[:] = [e for e in outside_events if e["until"] > now]
         context = {"trip": {"driving_min": 120}, "environment": {"road": "highway", "light": "night"},

@@ -280,14 +280,14 @@ button:hover {
 .log-panel {
   display: flex;
   flex-direction: column;
-  flex: 0 0 auto;   /* static, shorter log */
+  flex: 1 1 auto;   /* the log now fills the whole right column */
   min-height: 0;
 }
 
 .table-scroll {
-  flex: 0 0 auto;   /* was flex: 1, which collapsed the height to 0 when the log is empty */
+  flex: 1 1 0;
+  min-height: 460px;   /* keeps a sensible height when the log is empty */
   overflow-y: auto;
-  height: 270px;
   margin-top: 4px;
 }
 
@@ -487,3 +487,29 @@ tr.new td { animation: row-flash 1.4s ease-out; }
   line-height: 1.35;
   opacity: 0.7;
 }
+
+/* --- CAR ACTIONS column in the log --- */
+td:nth-child(5) { min-width: 170px; }
+.act {
+  display: inline-block;
+  margin: 0 6px 6px 0;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  font-size: 0.85rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* early-stage rows ("No action needed"): lighter, so real alerts stand out */
+tr.watching td { opacity: 0.7; }
+tr.watching td:nth-child(4) { font-style: italic; }
+
+/* --- FIXED HEIGHT FOR THE SUMMARY TABS ---
+   Both tab panels sit in the same grid cell, so the panel is always as tall as the taller one.
+   The inactive one stays in the layout but is invisible (visibility instead of display: none). */
+.summary-panel { display: grid; grid-template-rows: auto 1fr; }
+.summary-panel > .panel-header { grid-row: 1; grid-column: 1; }
+.summary-panel > .tile-grid { grid-row: 2; grid-column: 1; }
+.tile-grid[hidden] { display: grid; visibility: hidden; pointer-events: none; }
