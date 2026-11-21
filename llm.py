@@ -1,169 +1,327 @@
-"""LLM alerts: turn the driver state into one short spoken warning.
+"""LLM copilot: decides what to say AND what to do with the car.
 
-Run the test:  uv run python llm.py         (fake states, needs Ollama + the model from .env pulled)
-Run live:      uv run python face_basic.py  (terminal 1, writes state.json)
-               uv run python llm.py --live  (terminal 2, reads state.json and prints alerts)
-Settings:      copy .env.example to .env and set LLM_MODEL (e.g. llama3.2:1b on CPU, llama3.2:3b on GPU)
+Inputs:  state    the driver, REAL (face_basic.py -> state.json)
+         context  the world around the car, any dict (scenarios.py, made by a teammate), e.g.
+                  {"trip": {...}, "environment": {...}, "vehicle": {...}, "events": [...], "notes": [...]}
+         history  kept here: driver problems in the last 10 min + our last decisions and if the driver reacted
+Output:  {"level", "message", "actions", "reason", ...} -> voice + car (dashboard)
 
-Vision (and the demo scenarios) decide WHEN to alert. The LLM only decides WHAT to say.
-If the LLM is slow, down or says something unsafe, a fixed message is used instead.
+Safety: the LLM only PROPOSES. Guardrails decide what is executed:
+  - check_actions(): only allowed actions, only in the safer direction (switch ON / brake, never the opposite)
+  - the level is at least what the code decided, and the LLM may raise it by one step at most
+  - actions must fit the level (ACTIONS_BY_LEVEL): no braking for a yawn
+  - eyes closed >= 3 s triggers the emergency actions without waiting for the LLM:
+    the main loop must call emergency(state) on EVERY tick (decide() can take seconds)
+
+Test:  uv run python llm.py                  (fake situations, needs Ollama + LLM_MODEL from .env)
+Live:  uv run python face_basic.py           (terminal 1, writes state.json)
+       uv run python llm.py --live           (terminal 2, prints decisions)
 """
 import json
 import os
 import re
 import sys
 import time
+from collections import Counter, deque
 
 import ollama
 from dotenv import load_dotenv
 
-from scenarios import EVENTS
-
 load_dotenv()
 MODEL = os.getenv("LLM_MODEL", "llama3.2:1b")
-TIMEOUT_SEC = float(os.getenv("LLM_TIMEOUT_SEC", "3"))
-HOLD_SEC = 1.0             # live mode: a problem must last this long before alerting
-COOLDOWN_SEC = 8.0         # live mode: min seconds before repeating the same alert
-STATE_FILE = "state.json"  # written by face_basic.py
+TIMEOUT_SEC = float(os.getenv("LLM_TIMEOUT_SEC", "8"))   # JSON answers are longer than one sentence
+HOLD_SEC = 1.0          # a driver problem must last this long before we react
+COOLDOWN_SEC = 8.0      # min seconds before reacting again to the same thing
+HISTORY_SEC = 600       # history window: last 10 minutes
+EMERGENCY_SEC = 3.0     # eyes closed this long -> emergency actions, no LLM needed
+MAX_BRAKE = 0.3         # the system never brakes harder than this (0..1)
+STATE_FILE = "state.json"
 
-SYSTEM = ("You are a car safety assistant. You speak to the driver to keep them awake "
-          "and focused, and warn them about dangers on the road. "
-          "Reply with ONE short spoken sentence, max 12 words.")
-EXAMPLES = [
-    ("eyes closed for 2 seconds", "Wake up! Open your eyes and focus on the road."),
-    ("looking away from the road for 3 seconds", "Eyes back on the road, please."),
-    ("holding a phone while driving", "Please put the phone down and focus on driving."),
-    ("eyes often closing, getting drowsy", "You seem tired. Let's find a place to take a break."),
-    ("driver is yawning", "You're yawning, maybe it's time for a short break."),
-    ("driver's face is not visible to the camera", "I can't see you, please face the road."),
-    ("the car ahead is braking hard", "The car ahead is braking, slow down!"),
-    ("a cyclist is riding close on the right side; looking away from the road for 3 seconds",
-     "Eyes on the road, there's a cyclist on your right!"),
-]
+LEVELS = ["info", "warning", "critical"]
+# driver problem -> fixed fallback message, words a good message must contain
 FALLBACK = {
     "drowsy": "Wake up! Open your eyes and focus on the road.",
     "distracted": "Eyes back on the road, please.",
     "phone": "Please put the phone down and focus on driving.",
     "yawning": "You're yawning. Consider a short break soon.",
+    "hypnosis": "Stay sharp. Move your eyes around and take a break soon.",
     "no_face": "I can't see you. Please face the road.",
 }
-UNSAFE = ["keep your eyes closed", "close your eyes", "go to sleep", "get some sleep", "nap",  # dangerous advice
-          "i cannot", "i can't", "sorry", "i don't", "as an ai"]          # refusals / nonsense
-# the alert must mention at least one of these, or it's off-topic
 RELEVANT = {
-    "drowsy": ["wake", "eyes", "tired", "break", "awake", "rest stop", "open"],
+    "drowsy": ["wake", "eyes", "tired", "break", "awake", "open", "stop", "rest"],
     "distracted": ["road", "eyes", "focus", "look", "ahead"],
     "phone": ["phone"],
     "yawning": ["yawn", "tired", "break", "rest", "coffee"],
+    "hypnosis": ["break", "focus", "sharp", "awake", "rest", "eyes"],
     "no_face": ["road", "see you", "camera", "face the"],
 }
+UNSAFE = ["keep your eyes closed", "close your eyes", "go to sleep", "get some sleep", "nap",
+          "i cannot", "i can't", "sorry", "i don't", "as an ai"]
+# proportionality: which actions each level may use
+ACTIONS_BY_LEVEL = {"info": set(),
+                    "warning": {"seat_vibration", "wheel_vibration", "cruise_control"},
+                    "critical": {"seat_vibration", "wheel_vibration", "cruise_control", "hazard_lights", "brake"}}
+EMERGENCY = {"hazard_lights": True, "brake": MAX_BRAKE, "cruise_control": False,
+             "wheel_vibration": True, "seat_vibration": True}
+
+SYSTEM = """You are the safety copilot of a car. You get the driver's state from a camera, what happened \
+in the last minutes, your last decision, and the situation around the car. Decide how to respond.
+Speak directly TO the driver ("you"). Be proportionate: a yawn needs words, not brakes.
+Reply ONLY with JSON:
+{"level": "info|warning|critical", "message": "one short spoken sentence for the driver, max 15 words",
+ "actions": [{"name": "...", "value": ...}], "reason": "why, max 15 words"}
+Allowed actions: hazard_lights true, seat_vibration true, wheel_vibration true, cruise_control false, brake 0.1-0.3.
+Use actions only when needed. If the driver ignored your last warning, escalate. Use the history and the situation."""
+EXAMPLE_IN = """driver now: yawning
+driver last 10 min: 2x yawning, 1x drowsy
+your last decision 40 s ago: "You seem tired, take a break soon." actions={} -> the driver still has this problem
+trip: driving_min=150, clock=00:10
+environment: road=highway, light=night"""
+EXAMPLE_OUT = json.dumps({
+    "level": "warning", "message": "You're still yawning after midnight. Let's stop at the next rest area.",
+    "actions": [{"name": "seat_vibration", "value": True}],
+    "reason": "Third fatigue sign in 10 minutes and the earlier warning was ignored."})
 
 client = ollama.Client(timeout=TIMEOUT_SEC)   # OLLAMA_HOST in .env if Ollama runs elsewhere
 
 
 def describe(state):
-    """Return (reason, situation text) or None if the driver is fine."""
+    """Driver problem -> (reason, text, minimum level), or None if the driver is fine."""
     if not state.get("face_found", True):
-        return "no_face", "driver's face is not visible to the camera"
+        return "no_face", "driver's face is not visible to the camera", "warning"
     if state.get("eyes_closed_sec", 0) >= 1.5:
-        return "drowsy", f"eyes closed for {state['eyes_closed_sec']:.0f} seconds"
+        return "drowsy", f"eyes closed for {state['eyes_closed_sec']:.1f} seconds", "critical"
     if state.get("perclos", 0) >= 0.15:
-        return "drowsy", "eyes often closing, getting drowsy"
+        return "drowsy", "eyes often closing, getting drowsy", "warning"
     if state.get("looking_away_sec", 0) >= 2:
-        return "distracted", f"looking away from the road for {state['looking_away_sec']:.0f} seconds"
+        return "distracted", f"looking away from the road for {state['looking_away_sec']:.0f} seconds", "warning"
+    if state.get("vats_alert"):
+        return "distracted", "glancing away from the road too often", "warning"
     if state.get("hand_near_face"):
-        return "phone", "holding a phone while driving"
+        return "phone", "holding a phone while driving", "critical"
+    if state.get("hypnosis"):
+        return "hypnosis", "highway hypnosis: gaze fixed, rare blinking", "warning"
     if state.get("yawning"):
-        return "yawning", "driver is yawning"
+        return "yawning", "driver is yawning", "info"
     return None
 
 
+class History:
+    """What happened in the last HISTORY_SEC: driver problems and our own decisions."""
+
+    def __init__(self):
+        self.problems = deque()    # (time, reason)
+        self.decisions = deque()   # (time, trigger, decision)
+
+    def _trim(self, now):
+        for q in (self.problems, self.decisions):
+            while q and now - q[0][0] > HISTORY_SEC:
+                q.popleft()
+
+    def add_problem(self, reason, now):
+        self.problems.append((now, reason))
+
+    def add_decision(self, trigger, decision, now):
+        self.decisions.append((now, trigger, decision))
+
+    def summary(self, current, now):
+        """Short text for the prompt. current = the problem/event we're reacting to now."""
+        self._trim(now)
+        counts = Counter(r for _, r in self.problems)
+        lines = ["driver last 10 min: " + (", ".join(f"{n}x {r}" for r, n in counts.items()) or "no problems")]
+        if self.decisions:
+            t, trigger, d = self.decisions[-1]
+            reacted = "the driver still has this problem" if trigger == current else "the driver reacted"
+            lines.append(f'your last decision {now - t:.0f} s ago: "{d["message"]}" '
+                         f"actions={d['actions']} -> {reacted}")
+        return "\n".join(lines)
+
+
+def render(context):
+    """Any context dict -> short text lines. New keys show up automatically."""
+    lines = []
+    for key, value in context.items():
+        if isinstance(value, dict) and value:
+            lines.append(f"{key}: " + ", ".join(f"{k}={v}" for k, v in value.items()))
+        elif isinstance(value, list) and value:
+            items = [v.get("text") or v.get("situation") or str(v) if isinstance(v, dict) else str(v) for v in value]
+            lines.append(f"{key}: " + "; ".join(items))
+    return "\n".join(lines)
+
+
+def event_info(event):
+    """Read an outside event, whatever format the teammate uses (dict or plain string)."""
+    if not isinstance(event, dict):
+        return str(event), "warning", [], f"Careful: {event}."
+    text = event.get("text") or event.get("situation") or str(event)
+    level = event.get("severity") if event.get("severity") in LEVELS else "warning"
+    keywords = event.get("keywords") or event.get("must_mention") or []
+    return text, level, keywords, event.get("fallback") or f"Careful: {text}."
+
+
 def clean(text):
-    """Keep only the first sentence, without quotes or 'Situation:' leftovers."""
-    text = re.sub(r"(?i)situation:.*?->", "", text).strip()
-    quoted = re.findall(r"['\"“](.+?)['\"”]", text)
-    if quoted:
-        text = quoted[0]
-    return re.split(r"(?<=[.!?])\s", text.strip(), maxsplit=1)[0].strip()
+    text = str(text).strip().strip("\"'")
+    return re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0].strip()
 
 
 def is_ok(text, must_mention):
     low = text.lower()
-    return (2 <= len(text.split()) <= 20
-            and not any(p in low for p in UNSAFE)
-            and any(k in low for k in must_mention))
+    return (2 <= len(text.split()) <= 20 and not any(p in low for p in UNSAFE)
+            and (not must_mention or any(k in low for k in must_mention)))
+
+
+def check_actions(proposed):
+    """Guardrail: keep only allowed actions, and only in the safer direction."""
+    if isinstance(proposed, dict):                       # {"brake": 0.2} is also accepted
+        proposed = [{"name": k, "value": v} for k, v in proposed.items()]
+    safe = {}
+    for a in proposed if isinstance(proposed, list) else []:
+        if not isinstance(a, dict):
+            continue
+        name, value = a.get("name"), a.get("value")
+        on = value is True or str(value).lower() in ("true", "on", "1")
+        if name == "brake":
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                safe["brake"] = round(min(value, MAX_BRAKE), 2)
+        elif name == "cruise_control" and not on:        # may only switch it OFF
+            safe["cruise_control"] = False
+        elif name in ("hazard_lights", "seat_vibration", "wheel_vibration") and on:   # may only switch ON
+            safe[name] = True
+    return safe
 
 
 def warm_up():
-    """Load the model into RAM at startup so the first real alert is fast.
-    Uses its own long timeout: loading a bigger model can take much longer than one alert."""
+    """Load the model at startup (own long timeout: loading can take much longer than one answer)."""
     try:
         ollama.Client(timeout=120).generate(model=MODEL, prompt="hi", options={"num_predict": 1}, keep_alive="30m")
     except Exception as e:
-        print(f"[llm] warm-up failed ({type(e).__name__}): alerts will use fixed messages")
+        print(f"[llm] warm-up failed ({type(e).__name__}): decisions will use fixed messages")
 
 
-def get_alert(state, event=None):
-    """Return the alert text to speak, or None if no alert is needed.
-
-    event: optional key from scenarios.EVENTS (something happening outside the car).
-    """
+def decide(state, context, history, now=None):
+    """Return a decision dict, or None if nothing needs a reaction."""
+    now = now or time.time()
     found = describe(state)
-    if not found and not event:
+    events = context.get("events") or []
+    if not found and not events:
         return None
 
-    parts = []
-    if event:      # the outside danger comes first, it's the most urgent
-        parts.append(EVENTS[event]["situation"])
-    if found:
-        parts.append(found[1])
-    situation = "; ".join(parts)
-    if event:
-        must_mention, fallback = EVENTS[event]["must_mention"], EVENTS[event]["fallback"]
+    # the code decides the minimum level and the fallback; an outside danger comes first
+    levels = [found[2]] if found else []
+    if events:
+        text, ev_level, keywords, fallback = event_info(events[0])
+        trigger = events[0].get("type", text) if isinstance(events[0], dict) else text
+        levels.append(ev_level)
     else:
-        must_mention, fallback = RELEVANT[found[0]], FALLBACK[found[0]]
+        trigger, keywords, fallback = found[0], RELEVANT[found[0]], FALLBACK[found[0]]
+    min_level = max(levels, key=LEVELS.index)
 
-    messages = [{"role": "system", "content": SYSTEM}]
-    for user, assistant in EXAMPLES:
-        messages += [{"role": "user", "content": user},
-                     {"role": "assistant", "content": assistant}]
-    messages.append({"role": "user", "content": situation})
-
+    prompt = "\n".join([f"driver now: {found[1] if found else 'attentive'}",
+                        history.summary(trigger, now), render(context)])
+    decision = {"level": min_level, "message": fallback, "actions": {}, "reason": "fixed rule",
+                "trigger": trigger, "source": "fallback"}
     try:
-        reply = client.chat(model=MODEL, messages=messages,
-                            options={"num_predict": 30}, keep_alive="30m")
-        text = clean(reply["message"]["content"])
-        if is_ok(text, must_mention):
-            return text
-        print(f"[llm] rejected {text!r}, using fallback")
-    except Exception as e:  # LLM down, timeout, model missing...
+        reply = client.chat(model=MODEL, format="json", keep_alive="30m", options={"num_predict": 150},
+                            messages=[{"role": "system", "content": SYSTEM},
+                                      {"role": "user", "content": EXAMPLE_IN},
+                                      {"role": "assistant", "content": EXAMPLE_OUT},
+                                      {"role": "user", "content": prompt}])
+        d = json.loads(reply["message"]["content"])
+        message = clean(d.get("message", ""))
+        if is_ok(message, keywords):
+            decision.update(message=message, source="llm")
+        else:
+            print(f"[llm] rejected message {message!r}")
+        decision["actions"] = check_actions(d.get("actions"))
+        if d.get("level") in LEVELS:                       # may raise the level by one step, never lower it
+            wanted = min(LEVELS.index(d["level"]), LEVELS.index(min_level) + 1)
+            decision["level"] = LEVELS[max(wanted, LEVELS.index(min_level))]
+        decision["actions"] = {k: v for k, v in decision["actions"].items()
+                               if k in ACTIONS_BY_LEVEL[decision["level"]]}
+        if d.get("reason"):
+            decision["reason"] = clean(d["reason"])[:150]
+    except Exception as e:                                 # LLM down, timeout, invalid JSON...
         print(f"[llm] fallback ({type(e).__name__}: {e})")
-    return fallback
+
+    if state.get("eyes_closed_sec", 0) >= EMERGENCY_SEC:   # deterministic emergency, LLM can't cancel it
+        decision["actions"].update(EMERGENCY)
+        decision["level"] = "critical"
+    history.add_decision(trigger, decision, now)
+    return decision
+
+
+class Copilot:
+    """Decides WHEN to ask the LLM: a driver problem that lasts HOLD_SEC, or a new outside event."""
+
+    def __init__(self):
+        self.history = History()
+        self.problem, self.since, self.counted = None, 0.0, False
+        self.last = {}            # trigger -> time of our last reaction
+        self.seen_events = set()
+
+    def should_decide(self, state, context, now=None):
+        now = now or time.time()
+        found = describe(state)
+        reason = found[0] if found else None
+        if reason != self.problem:                         # problem changed: restart the hold timer
+            self.problem, self.since, self.counted = reason, now, False
+        held = reason and now - self.since >= HOLD_SEC
+        if held and not self.counted:                      # count each problem once in the history
+            self.history.add_problem(reason, now)
+            self.counted = True
+        ids = {json.dumps(e, sort_keys=True, default=str) if isinstance(e, dict) else str(e)
+               for e in context.get("events") or []}
+        new_event = bool(ids - self.seen_events)
+        self.seen_events = ids
+        due = held and now - self.last.get(reason, 0) >= COOLDOWN_SEC
+        if new_event or due:
+            if reason:
+                self.last[reason] = now
+            return True
+        return False
+
+    def decide(self, state, context, now=None):
+        return decide(state, context, self.history, now)
+
+
+def emergency(state):
+    """Call on every tick, BEFORE/independent of decide(): returns the emergency actions or None.
+    Deterministic and instant: an emergency must never wait for the LLM."""
+    if state and state.get("eyes_closed_sec", 0) >= EMERGENCY_SEC:
+        return dict(EMERGENCY)
+    return None
+
+
+def read_state(path=STATE_FILE):
+    """The driver state written by face_basic.py, or None if it's missing/old (vision not running)."""
+    try:
+        if time.time() - os.path.getmtime(path) > 2:
+            return None
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
 
 
 def live():
-    """Read the state that face_basic.py writes and print an alert when needed."""
     warm_up()
     print(f"live mode, model: {MODEL}. Start face_basic.py in another terminal. Ctrl+C to stop.")
-    problem, since, last_alert, last_problem = None, 0.0, 0.0, None
+    copilot = Copilot()
+    context = {"vehicle": {"speed_kmh": 100}}              # until scenarios.py provides the real context
+    in_emergency = False
     while True:
         time.sleep(0.2)
-        try:
-            if time.time() - os.path.getmtime(STATE_FILE) > 2:
-                continue                      # face_basic.py isn't running (old file)
-            with open(STATE_FILE) as f:
-                state = json.load(f)
-        except (OSError, ValueError):
-            continue                          # file missing or being written right now
-        found = describe(state)
-        reason = found[0] if found else None
-        if reason != problem:                 # problem changed: restart the hold timer
-            problem, since = reason, time.time()
-        now = time.time()
-        repeat = problem == last_problem and now - last_alert < COOLDOWN_SEC
-        if problem and now - since >= HOLD_SEC and not repeat:
-            print(f"[{problem}] {get_alert(state)}")
-            last_alert, last_problem = now, problem
+        state = read_state()
+        actions = emergency(state)
+        if actions and not in_emergency:
+            print(f"[EMERGENCY] {FALLBACK['drowsy']} {actions}")
+        in_emergency = bool(actions)
+        if state and copilot.should_decide(state, context):
+            print(copilot.decide(state, context))
 
 
 if __name__ == "__main__":
@@ -171,29 +329,24 @@ if __name__ == "__main__":
         live()
         sys.exit()
 
-    from state import new_state
-
-    def fake(**values):
-        s = new_state()
-        s.update({"face_found": True, **values})
-        return s
-
     warm_up()
     print(f"model: {MODEL}, timeout: {TIMEOUT_SEC}s")
-    tests = [  # (driver state, outside event)
-        (fake(perclos=0.05), None),                       # all good -> None
-        (fake(eyes_closed_sec=2.1, perclos=0.2), None),   # drowsy
-        (fake(looking_away_sec=3.4), None),               # distracted
-        (fake(hand_near_face=True), None),                # phone
-        (fake(yawning=True), None),                       # yawning
-        (fake(face_found=False), None),                   # driver not visible
-        (fake(), "pedestrian"),                           # attentive driver, pedestrian
-        (fake(looking_away_sec=3.0), "pedestrian"),       # distracted + pedestrian (worst case)
-        (fake(hand_near_face=True), "car_braking"),       # phone + braking car
-        (fake(), "cyclist"),
-        (fake(eyes_closed_sec=1.8), "animal"),
+    history = History()
+    ctx = {"trip": {"driving_min": 130, "clock": "23:40"},
+           "environment": {"road": "highway", "weather": "rain", "light": "night"},
+           "vehicle": {"speed_kmh": 110, "cruise_control": True}, "events": []}
+    ok = {"face_found": True}
+    tests = [
+        ("yawning, first time", {**ok, "yawning": True}, ctx),
+        ("yawning again (history)", {**ok, "yawning": True}, ctx),
+        ("looking away", {**ok, "looking_away_sec": 3.2}, ctx),
+        ("pedestrian + attentive", ok, {**ctx, "events": [
+            {"type": "pedestrian", "text": "a pedestrian is crossing ahead, not at a crosswalk",
+             "severity": "critical", "keywords": ["pedestrian", "crossing", "person"]}]}),
+        ("eyes closed 3.5 s (emergency)", {**ok, "eyes_closed_sec": 3.5}, ctx),
     ]
-    for _ in range(2):
-        for s, event in tests:
-            t = time.time()
-            print(f"{str(event):12} {get_alert(s, event)!r:62} ({time.time() - t:.1f}s)")
+    for name, state, context in tests:
+        history.add_problem(describe(state)[0], time.time()) if describe(state) else None
+        t = time.time()
+        d = decide(state, context, history)
+        print(f"\n--- {name} ({time.time() - t:.1f}s, {d['source']})\n{json.dumps(d, indent=1)}")
