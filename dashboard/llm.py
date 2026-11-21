@@ -56,7 +56,7 @@ FALLBACK = {
     "distracted": "Eyes back on the road, please.",
     "phone": "Please put the phone down and focus on driving.",
     "yawning": "You're yawning. Consider a short break soon.",
-    "hypnosis": "Stay sharp. Move your eyes around and take a break soon.",
+    "hypnosis": "Take a short break soon.",
     "no_face": "I can't see you. Please face the road.",
 }
 RELEVANT = {
@@ -64,7 +64,7 @@ RELEVANT = {
     "distracted": ["road", "eyes", "focus", "look", "ahead"],
     "phone": ["phone"],
     "yawning": ["yawn", "tired", "break", "rest", "coffee"],
-    "hypnosis": ["break", "focus", "sharp", "awake", "rest", "eyes"],
+    "hypnosis": ["road", "eyes", "focus", "break"],
     "no_face": ["road", "see you", "camera", "face the"],
 }
 UNSAFE = ["keep your eyes closed", "close your eyes", "go to sleep", "get some sleep", "nap",
@@ -79,8 +79,10 @@ EMERGENCY = {"hazard_lights": True, "brake": MAX_BRAKE, "cruise_control": False,
 SYSTEM = """You are the safety copilot of a car. You get the driver's state from a camera, what happened \
 in the last minutes, your last decision, and the situation around the car. Decide how to respond.
 Speak directly TO the driver ("you"). Be proportionate: a yawn needs words, not brakes.
+Never describe the driver's state or use frightening words (no "drowsy", "hypnosis", "asleep", "danger").
+Say only what to do, in a calm tone. Examples: "Eyes on the road, please." "Take a short break soon." "Phone down, please."
 Reply ONLY with JSON:
-{"level": "info|warning|critical", "message": "one short spoken sentence for the driver, max 15 words",
+{"level": "info|warning|critical", "message": "one very short spoken sentence for the driver, max 8 words",,
  "actions": [{"name": "...", "value": ...}], "reason": "why, max 15 words"}
 Allowed actions: hazard_lights true, seat_vibration true, wheel_vibration true, cruise_control false, brake 0.1-0.3.
 Use actions only when needed. If the driver ignored your last warning, escalate. Use the history and the situation."""
@@ -90,7 +92,7 @@ your last decision 40 s ago: "You seem tired, take a break soon." actions={} -> 
 trip: driving_min=150, clock=00:10
 environment: road=highway, light=night"""
 EXAMPLE_OUT = json.dumps({
-    "level": "warning", "message": "You're still yawning after midnight. Let's stop at the next rest area.",
+    "level": "warning", "message": "You're still yawning. Let's stop at the next rest area.",
     "actions": [{"name": "seat_vibration", "value": True}],
     "reason": "Third fatigue sign in 10 minutes and the earlier warning was ignored."})
 

@@ -25,9 +25,7 @@ def new_state():
         "alert_reason": "",           # most important active alert code (see alerts.RULES), "" if none
         "active_alerts": [],          # all active alert codes, most important first
         "events": [],                 # last alerts that started: {ts, time, type, level}
-        "drowsiness_score": 0,        # 0-100 combined fatigue
         "fatigue_level": "ok",        # ok | tired | drowsy
-        "attention_score": 100,       # 0-100 combined attention to the road
 
         # --- people ---
         "face_found": False,          # the driver's face is visible
@@ -43,6 +41,12 @@ def new_state():
         "microsleep_count_10min": 0,  # microsleep episodes in the last 10 minutes
         "perclos": 0.0,               # 0..1, share of the last 60 s with the eyes closed (0 is normal when awake)
         "blink_rate": 0,              # blinks in the last minute
+        "squinting": False,  # eyelids narrowed (squint), not fully closed
+
+        # --- head ---
+        "head_yaw": 0.0,  # degrees, left/right relative to the calibrated road pose
+        "head_pitch": 0.0,  # degrees, up/down relative to the calibrated road pose
+        "head_roll": 0.0,  # degrees, sideways tilt
 
         # --- mouth ---
         "yawning": False,             # yawning right now
