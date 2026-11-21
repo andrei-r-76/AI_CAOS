@@ -13,7 +13,6 @@
   <div class="top-right">
     <span class="live-status"><i id="conn-light" class="dot off"></i><span id="conn-text">Connecting…</span></span>
     <label class="switch"><input type="checkbox" id="voice-toggle" checked> Car voice</label>
-    <button id="demo-toggle" class="ghost">Scenarios</button>
   </div>
 </header>
 
@@ -30,6 +29,7 @@
 </div>
 
 <main class="layout-16-9">
+  <!-- LEFT COLUMN: DRIVER STATUS, GUIDANCE, METRICS & PLAIN-TEXT CHAT -->
   <section class="left-col">
     <!-- Driver Status & Guidance -->
     <div id="hero" class="panel status-panel state-ok">
@@ -44,37 +44,30 @@
       </div>
     </div>
 
-    <!-- Key Driver Metrics (No Outlines) -->
-    <div class="metrics-grid">
-      <div class="metric-card">
-        <span class="metric-label">Eyes Closed (PERCLOS)</span>
-        <b class="metric-value primary-val" id="m-perclos">—</b>
-      </div>
-
-      <div class="metric-card">
-        <span class="metric-label">Eye Openness (EAR)</span>
-        <b class="metric-value primary-val" id="m-ear">—</b>
-      </div>
-
-      <div class="metric-card">
-        <span class="metric-label">Phone Detected</span>
-        <b class="metric-value primary-val" id="m-phone">—</b>
-      </div>
-
-      <div class="metric-card">
-        <span class="metric-label">Head Yaw (Left / Right)</span>
-        <b class="metric-value" id="m-yaw">—</b>
-      </div>
-
-      <div class="metric-card">
-        <span class="metric-label">Head Pitch (Nodding)</span>
-        <b class="metric-value" id="m-pitch">—</b>
-      </div>
-
-      <div class="metric-card">
-        <span class="metric-label">Mouth Opening (MAR)</span>
-        <b class="metric-value" id="m-mar">—</b>
-      </div>
+    <!-- Driver summary: live values and session counts, by category -->
+    <div class="panel summary-panel">
+      <div class="panel-header"><h2>Driver summary</h2></div>
+      <table class="summary-table">
+        <thead><tr><th>Measure</th><th>Now</th><th>This session</th></tr></thead>
+        <tbody>
+          <tr class="cat"><th colspan="3">Eyes</th></tr>
+          <tr><td>Eye openness </td><td id="m-ear">—</td><td></td></tr>
+          <tr><td>Eyes closed </td><td id="m-perclos">—</td><td id="c-perclos"></td></tr>
+          <tr><td>Blinks</td><td id="m-blinks">—</td><td></td></tr>
+          <tr><td>Eye rubbing</td><td id="m-eyerub">—</td><td id="c-eyerub"></td></tr>
+          <tr class="cat"><th colspan="3">Head and face</th></tr>
+          <tr><td>Yaw</td><td id="m-yaw">—</td><td id="c-yaw"></td></tr>
+          <tr><td>Pitch</td><td id="m-pitch">—</td><td id="c-pitch"></td></tr>
+          <tr><td>Face in view</td><td id="m-face">—</td><td id="c-face"></td></tr>
+          <tr class="cat"><th colspan="3">Mouth and hands</th></tr>
+          <tr><td>Mouth opening </td><td id="m-mar">—</td><td id="c-mar"></td></tr>
+          <tr><td>Phone in hand</td><td id="m-phone">—</td><td id="c-phone"></td></tr>
+          <tr class="cat"><th colspan="3">Session</th></tr>
+          <tr><td>Time attentive</td><td id="s-ok">—</td><td></td></tr>
+          <tr><td>Alerts</td><td id="s-alerts">0</td><td id="c-alerts"></td></tr>
+          <tr><td>Session time</td><td id="s-time">00:00</td><td></td></tr>
+        </tbody>
+      </table>
     </div>
 
     <!-- Plain-Text Chat (Matches Log Style) -->
@@ -102,45 +95,6 @@
 
   <!-- RIGHT COLUMN: WIDE, TALL DETECTION LOG -->
   <section class="right-col">
-    <div class="panel cam-panel">
-      <div class="panel-header"><h2>Camera</h2></div>
-      <div class="cam">
-        <div class="cam-empty">Camera feed appears when the detector is running</div>
-        <img id="cam" src="/video_feed" alt="">
-      </div>
-      <div class="calib">
-        <span class="field-label">Calibration</span>
-        <span id="calib-text">Waiting for data…</span>
-        <button id="recal-btn" class="ghost">Recalibrate</button>
-      </div>
-    </div>
-
-    <div class="panel summary-panel">
-      <div class="panel-header"><h2>Session summary</h2></div>
-      <div class="sum-grid">
-        <div><span>Session time</span><b id="s-time">00:00</b></div>
-        <div><span>Alerts</span><b id="s-alerts">0</b></div>
-        <div><span>Highest level</span><b id="s-level">0</b></div>
-        <div><span>Average fatigue</span><b id="s-avg">—</b></div>
-        <div><span>Peak fatigue</span><b id="s-peak">—</b></div>
-        <div><span>Time attentive</span><b id="s-ok">—</b></div>
-        <div><span>Blinks per minute</span><b id="s-blinks">—</b></div>
-        <div><span>Blink length</span><b id="s-blinkms">—</b></div>
-        <div><span>Yawns, last 5 min</span><b id="s-yawns">0</b></div>
-      </div>
-      <div class="sum-sub">Detections this session</div>
-      <div class="det-grid">
-        <div data-kind="yawn"><span>Yawning</span><b>0</b></div>
-        <div data-kind="drowsy"><span>Drowsiness</span><b>0</b></div>
-        <div data-kind="microsleep"><span>Microsleep</span><b>0</b></div>
-        <div data-kind="nod"><span>Head nodding</span><b>0</b></div>
-        <div data-kind="distracted"><span>Looking away</span><b>0</b></div>
-        <div data-kind="phone"><span>Phone use</span><b>0</b></div>
-        <div data-kind="eyerub"><span>Eye rubbing</span><b>0</b></div>
-        <div data-kind="noface"><span>Not visible</span><b>0</b></div>
-      </div>
-    </div>
-
     <div class="panel log-panel">
       <div class="panel-header">
         <h2>Detection &amp; Response Log</h2>

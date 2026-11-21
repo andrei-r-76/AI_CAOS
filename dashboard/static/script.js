@@ -48,47 +48,42 @@ src.onmessage = e => {
   else if (ev.type === "calibration") onCalibration(ev);
 };
 
-function onMetrics({ metrics: m, flags, state, score, t, yawns, source }) {
+function onMetrics({ metrics: m, flags, state, t, yawns, source }) {
   $("hero").className = "panel status-panel state-" + state;
   $("hero-state").textContent = STATE[state].label;
   $("hero-sub").textContent = flags.length ? flags.map(f => NAMES[f]).join(", ") : STATE[state].sub;
+  if (!flags.length) $("suggestion-text").textContent = SUGGESTIONS[state];
 
-  if (!flags.length) {
-    $("suggestion-text").textContent = SUGGESTIONS[state];
-  }
-
+  // live values
   const noFace = m.face === false;
   const f = (v, fn) => (noFace || v == null ? "—" : fn(v));
-  $("m-perclos").textContent = f(m.perclos, v => Math.round(v * 100) + "%");
+  const yn = v => (v ? "Yes" : "No");
   $("m-ear").textContent = f(m.ear, v => v.toFixed(2));
-  $("m-phone").textContent = f(m.phone, v => (v ? "Yes" : "No"));
+  $("m-perclos").textContent = f(m.perclos, v => Math.round(v * 100) + "%");
+  $("m-blinks").textContent = f(m.blink_rate, v => Math.round(v) + "/min" + (m.blink_ms == null ? "" : ", " + Math.round(m.blink_ms) + " ms"));
+  $("m-eyerub").textContent = f(m.eyerub, yn);
   $("m-yaw").textContent = f(m.yaw, v => Math.round(v) + "°");
   $("m-pitch").textContent = f(m.pitch, v => Math.round(v) + "°");
+  $("m-face").textContent = noFace ? "No" : "Yes";
   $("m-mar").textContent = f(m.mar, v => v.toFixed(2));
+  $("m-phone").textContent = f(m.phone, yn);
 
-  // session summary
-  stats.scoreSum += score; stats.scoreN++; stats.peak = Math.max(stats.peak, score);
+  // session statistics
+  stats.yawns5 = yawns;
   if (stats.lastT != null) {
     const dt = Math.min(t - stats.lastT, 2);
     stats.totT += dt;
     if (state === "ok") stats.okT += dt;
   }
   stats.lastT = t;
-  $("s-avg").textContent = Math.round(stats.scoreSum / stats.scoreN);
-  $("s-peak").textContent = stats.peak;
-  $("s-ok").textContent = stats.totT ? Math.round(100 * stats.okT / stats.totT) + "%" : "—";
-  $("s-blinks").textContent = m.blink_rate == null ? "—" : Math.round(m.blink_rate);
-  $("s-blinkms").textContent = m.blink_ms == null ? "—" : Math.round(m.blink_ms) + " ms";
-  $("s-yawns").textContent = yawns;
-  $("calib-text").textContent = source === "simulator" ? "Not needed (simulated driver)"
-    : m.baseline != null ? "Done. Your open-eye baseline: " + m.baseline.toFixed(2) : "Done";
+  renderCounts();
+  $("calib-text").textContent = m.baseline != null ? "Done. Your open-eye baseline: " + m.baseline.toFixed(2) : "Done";
 }
 
 function onAlert(a) {
   stats.alerts++; stats.counts[a.kind] = (stats.counts[a.kind] || 0) + 1;
   $("s-alerts").textContent = stats.alerts;
-  const cell = document.querySelector(`.det-grid [data-kind="${a.kind}"] b`);
-  if (cell) cell.textContent = stats.counts[a.kind];
+  renderCounts();
   $("suggestion-text").textContent = a.text;
   addMsg("car", a.text);
   addLog(a.t, NAMES[a.kind] || a.kind, a.severity, a.text);
@@ -102,7 +97,7 @@ function onAlert(a) {
 
 function onAction(a) {
   stats.maxLevel = Math.max(stats.maxLevel, a.level);
-  $("s-level").textContent = stats.maxLevel;
+  renderCounts();
   alarm(a.actions.includes("alarm"));
   if (a.level < 2) return;
   const sev = a.level >= 3 ? 3 : 2;
@@ -164,8 +159,8 @@ async function ensureMicPermission() {
     return true;
   } catch {
     micGranted = false;
-    setMic(false, "Mic blocked, allow microphone to continue.");
-    addMsg("car", "Microphone permission was blocked.");
+    setMic(false, "Mic blocked — allow microphone in browser address bar");
+    addMsg("car", "Microphone permission was blocked. Click the lock icon next to the URL bar and set Microphone to Allow.");
     return false;
   }
 }
@@ -272,14 +267,9 @@ function esc(s) {
   return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 
-// ---- demo drawer ----
-$("demo-toggle").onclick = () => { $("demo").hidden = !$("demo").hidden; };
-document.querySelectorAll(".scen").forEach(b => b.onclick = () => {
-  document.querySelectorAll(".scen").forEach(x => x.classList.toggle("on", x === b));
-  fetch("/api/scenario", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: b.dataset.name }) });
-});
+
 // ---- session summary and calibration ----
-const stats = { start: Date.now(), alerts: 0, maxLevel: 0, scoreSum: 0, scoreN: 0, peak: 0, okT: 0, totT: 0, lastT: null, counts: {} };
+const stats = { start: Date.now(), alerts: 0, maxLevel: 0, okT: 0, totT: 0, lastT: null, counts: {}, yawns5: 0 };
 const pad = n => String(n).padStart(2, "0");
 setInterval(() => {
   const s = Math.floor((Date.now() - stats.start) / 1000);
@@ -295,3 +285,18 @@ $("recal-btn").onclick = () => {
   $("calib-text").textContent = "Recalibration requested…";
   fetch("/api/recalibrate", { method: "POST" });
 };
+
+// the "This session" column of the driver summary
+function renderCounts() {
+  const n = k => stats.counts[k] || 0;
+  $("c-perclos").textContent = `Drowsy: ${n("drowsy")} · Microsleep: ${n("microsleep")} `;
+  $("c-eyerub").textContent = `${n("eyerub")} `;
+  $("c-yaw").textContent = `Looking away: ${n("distracted")} `;
+  $("c-pitch").textContent = `Nodding: ${n("nod")} `;
+  $("c-face").textContent = `Face not visible: ${n("noface")} `;
+  $("c-mar").textContent = `Yawning: ${n("yawn")}  · ${stats.yawns5} in last 5 min`;
+  $("c-phone").textContent = `${n("phone")} `;
+  $("c-alerts").textContent = `Highest level ${stats.maxLevel}`;
+  $("s-ok").textContent = stats.totT ? Math.round(100 * stats.okT / stats.totT) + "%" : "—";
+}
+renderCounts();

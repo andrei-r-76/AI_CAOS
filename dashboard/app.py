@@ -250,6 +250,6 @@ def chat():
 
 
 if __name__ == "__main__":
-    if os.getenv("DEMO", "1") == "1":
+    if os.getenv("DEMO", "0") == "1":
         threading.Thread(target=simulator, daemon=True).start()
     app.run(host="0.0.0.0", port=5000, threaded=True)
