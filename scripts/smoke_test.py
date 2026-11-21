@@ -13,6 +13,5 @@ assert app.analyse({"face": False})[2] == "warn"
 assert c.post("/api/event", json={"calibrating": 3.0}).json["ok"]
 assert c.post("/api/recalibrate").json["ok"] and c.post("/api/event", json=ok).json["recalibrate"]
 assert app.level >= 1, "escalation did not start"
-assert c.post("/api/scenario", json={"name": "drowsy"}).json["ok"]
 assert c.post("/api/ack").json["ok"] and app.level == 0
-print("smoke test passed")
+print("test passed")

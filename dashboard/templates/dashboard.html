@@ -29,7 +29,7 @@
 </div>
 
 <main class="layout-16-9">
-  <!-- LEFT COLUMN: DRIVER STATUS, GUIDANCE, METRICS & PLAIN-TEXT CHAT -->
+  <!-- LEFT COLUMN: DRIVER STATUS, GUIDANCE & METRICS -->
   <section class="left-col">
     <!-- Driver Status & Guidance -->
     <div id="hero" class="panel status-panel state-ok">
@@ -69,8 +69,30 @@
         </tbody>
       </table>
     </div>
+  </section>
 
-    <!-- Plain-Text Chat (Matches Log Style) -->
+  <!-- RIGHT COLUMN: DETECTION LOG + VOICE/TEXT DIALOGUE -->
+  <section class="right-col">
+    <div class="panel log-panel">
+      <div class="panel-header">
+        <h2>Detection &amp; Response Log</h2>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Detection</th>
+              <th>Severity</th>
+              <th>System Response</th>
+            </tr>
+          </thead>
+          <tbody id="log-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Voice & text dialogue, now under the log -->
     <div class="panel chat-panel">
       <div class="panel-header">
         <h2>Voice &amp; Text Dialogue</h2>
@@ -89,28 +111,6 @@
           </svg>
         </button>
         <span id="mic-hint" class="mic-hint">Tap or press Space to talk</span>
-      </div>
-    </div>
-  </section>
-
-  <!-- RIGHT COLUMN: WIDE, TALL DETECTION LOG -->
-  <section class="right-col">
-    <div class="panel log-panel">
-      <div class="panel-header">
-        <h2>Detection &amp; Response Log</h2>
-      </div>
-      <div class="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Detection</th>
-              <th>Severity</th>
-              <th>System Response</th>
-            </tr>
-          </thead>
-          <tbody id="log-body"></tbody>
-        </table>
       </div>
     </div>
   </section>

@@ -45,7 +45,6 @@ src.onmessage = e => {
   if (ev.type === "metrics") onMetrics(ev);
   else if (ev.type === "alert") onAlert(ev);
   else if (ev.type === "action") onAction(ev);
-  else if (ev.type === "calibration") onCalibration(ev);
 };
 
 function onMetrics({ metrics: m, flags, state, t, yawns, source }) {
@@ -77,7 +76,6 @@ function onMetrics({ metrics: m, flags, state, t, yawns, source }) {
   }
   stats.lastT = t;
   renderCounts();
-  $("calib-text").textContent = m.baseline != null ? "Done. Your open-eye baseline: " + m.baseline.toFixed(2) : "Done";
 }
 
 function onAlert(a) {
@@ -146,7 +144,7 @@ function setMic(on, hintText) {
 async function ensureMicPermission() {
   if (micGranted) return true;
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    addMsg("car", "Microphone blocked. Open via http://localhost:5000.");
+    addMsg("car", "Microphone blocked.");
     return false;
   }
   try {
@@ -159,7 +157,7 @@ async function ensureMicPermission() {
     return true;
   } catch {
     micGranted = false;
-    setMic(false, "Mic blocked — allow microphone in browser address bar");
+    setMic(false, "Mic blocked — allow microphone in browser.");
     addMsg("car", "Microphone permission was blocked. Click the lock icon next to the URL bar and set Microphone to Allow.");
     return false;
   }
@@ -268,7 +266,7 @@ function esc(s) {
 }
 
 
-// ---- session summary and calibration ----
+// ---- session summary ----
 const stats = { start: Date.now(), alerts: 0, maxLevel: 0, okT: 0, totT: 0, lastT: null, counts: {}, yawns5: 0 };
 const pad = n => String(n).padStart(2, "0");
 setInterval(() => {
@@ -276,25 +274,15 @@ setInterval(() => {
   $("s-time").textContent = pad(Math.floor(s / 60)) + ":" + pad(s % 60);
 }, 1000);
 
-function onCalibration({ left, waiting }) {
-  $("calib-text").textContent = waiting
-    ? "Waiting for your face. Look at the camera."
-    : "Calibrating: " + Math.ceil(left) + " s. Eyes open, look ahead.";
-}
-$("recal-btn").onclick = () => {
-  $("calib-text").textContent = "Recalibration requested…";
-  fetch("/api/recalibrate", { method: "POST" });
-};
-
 // the "This session" column of the driver summary
 function renderCounts() {
   const n = k => stats.counts[k] || 0;
-  $("c-perclos").textContent = `Drowsy: ${n("drowsy")} · Microsleep: ${n("microsleep")} `;
+  $("c-perclos").textContent = `Drowsy: ${n("drowsy")} / Microsleep: ${n("microsleep")} `;
   $("c-eyerub").textContent = `${n("eyerub")} `;
   $("c-yaw").textContent = `Looking away: ${n("distracted")} `;
   $("c-pitch").textContent = `Nodding: ${n("nod")} `;
   $("c-face").textContent = `Face not visible: ${n("noface")} `;
-  $("c-mar").textContent = `Yawning: ${n("yawn")}  · ${stats.yawns5} in last 5 min`;
+  $("c-mar").textContent = `Yawning: ${n("yawn")} / ${stats.yawns5} in last 5 min`;
   $("c-phone").textContent = `${n("phone")} `;
   $("c-alerts").textContent = `Highest level ${stats.maxLevel}`;
   $("s-ok").textContent = stats.totT ? Math.round(100 * stats.okT / stats.totT) + "%" : "—";
