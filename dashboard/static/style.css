@@ -245,7 +245,7 @@ button:hover {
   display: flex;
   flex-direction: column;
   flex: 0 0 auto;
-  height: 190px;
+  height: 272px;     /* taller now that the mic bar is gone, keeps both columns level */
   overflow-y: auto;
 }
 
@@ -273,34 +273,8 @@ button:hover {
   color: var(--text);
 }
 
-.mic-bar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--row-border);
-}
 
-.mic-btn {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  background: var(--primary);
-  color: #ffffff;
-}
-.mic-btn.listening {
-  background: var(--danger);
-}
 
-.mic-hint {
-  font-size: 1.05rem;
-  font-weight: 600;
-  color: var(--text);
-}
 
 /* --- RIGHT COLUMN: WIDE & TALL DETECTION LOG --- */
 .log-panel {
@@ -470,13 +444,6 @@ td:nth-child(2) {
 .tile { gap: 0; }
 .tile-val { margin-top: 14px; }
 
-/* driver messages sit on the right side of the dialogue box */
-.chat-row.me {
-  grid-template-columns: 1fr 95px;
-  text-align: right;
-}
-.chat-row.me .chat-meta { order: 2; }
-.chat-row.me .chat-text { order: 1; }
 
 /* --- SUMMARY TABS (Driver / Vehicle) --- */
 .tile-grid[hidden] { display: none; }
@@ -501,3 +468,22 @@ td:nth-child(2) {
 
 /* last vehicle tile (cruise control) spans the full row */
 .tile-wide { grid-column: 1 / -1; }
+
+/* new log rows flash briefly so they are easy to spot */
+@keyframes row-flash {
+  from { background: #e5e7eb; }
+  to   { background: transparent; }
+}
+tr.new td { animation: row-flash 1.4s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  tr.new td { animation: none; }
+}
+
+/* variables behind an assistant message, shown under it in the log */
+.log-why {
+  margin-top: 4px;
+  font-size: 0.85rem;
+  font-weight: 400;
+  line-height: 1.35;
+  opacity: 0.7;
+}

@@ -11,23 +11,9 @@
 <header class="topbar">
   <h1>Driver Monitoring System</h1>
   <div class="top-right">
-    <span class="live-status"><i id="conn-light" class="dot off"></i><span id="conn-text">Connecting…</span></span>
     <label class="switch"><input type="checkbox" id="voice-toggle" checked> Car voice</label>
   </div>
 </header>
-
-<div id="demo" class="demo" hidden>
-  <button class="scen on" data-name="auto">Auto</button>
-  <button class="scen" data-name="normal">Normal</button>
-  <button class="scen" data-name="yawn">Yawning</button>
-  <button class="scen" data-name="drowsy">Drowsy</button>
-  <button class="scen" data-name="microsleep">Microsleep</button>
-  <button class="scen" data-name="distracted">Looking away</button>
-  <button class="scen" data-name="phone">Phone</button>
-  <button class="scen" data-name="eyerub">Eye rubbing</button>
-  <button class="scen" data-name="noface">No face</button>
-</div>
-
 <main class="layout-16-9">
   <!-- LEFT COLUMN: DRIVER STATUS, GUIDANCE & METRICS -->
   <section class="left-col">
@@ -35,7 +21,7 @@
     <div id="hero" class="panel status-panel state-ok">
       <div class="status-top">
         <span class="field-label">Driver Status</span>
-        <div class="status-title" id="hero-state">OK</div>
+        <div class="status-title" id="hero-state">Alert</div>
         <div class="status-sub" id="hero-sub">Driver looks attentive.</div>
       </div>
       <div class="guidance-box" id="guidance" hidden>
@@ -166,25 +152,13 @@
       </div>
     </div>
 
-    <!-- Voice & text dialogue, now under the log -->
+    <!-- Assistant dialogue (read-only), under the log -->
     <div class="panel chat-panel">
       <div class="panel-header">
-        <h2>Voice &amp; Text Dialogue</h2>
+        <h2>Assistant Help</h2>
       </div>
       <div id="chat" class="chat-list">
-        <div class="chat-row">
-          <span class="chat-meta">System</span>
-          <span class="chat-text">Hi! Tap the microphone or press Space to talk.</span>
-        </div>
       </div>
-      <div class="mic-bar">
-        <button id="mic" class="mic-btn" aria-label="Talk to the car">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <rect x="9" y="3" width="6" height="12" rx="3"/>
-            <path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>
-          </svg>
-        </button>
-        <span id="mic-hint" class="mic-hint">Tap or press Space to talk</span>
       </div>
     </div>
   </section>
