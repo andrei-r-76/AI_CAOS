@@ -7,7 +7,8 @@ Keys:      q = quit   c = recalibrate   l = toggle CLAHE (low light)   m = toggl
 
 Modules (same folder):
   camera.py     camera thread + camera health (covered / dark)
-  gaze.py       gaze zones (head + eyes), attention metrics, eye fatigue (blinks, PERCLOS, microsleep)
+  eyes.py       ALL eye logic: open / half / closed per eye, one eye, blinks, microsleep, PERCLOS
+  gaze.py       gaze zones (head + eyes), attention metrics (on-road ratio, mirrors, long glance, hypnosis)
   head.py       head yaw/pitch/roll, head drop / nodding / tilt
   hand_face.py  hands relative to the face (near face, at ear, at eyes, at mouth)
   objects.py    YOLO phone / bottle / cup (optional)
@@ -18,7 +19,7 @@ Only the DRIVER (the largest face, "sticky") gets the full analysis; other faces
 
 TUNING NOTE: every line marked "TUNE:" (here and in the modules) is a value you can adjust.
 Values computed at calibration (resting jaw, eye opening open/closed, head pose on the road, gaze zones)
-are stored in calib.json. After changing EYE_OPEN_K, press `c` to recalibrate.
+are stored in calib.json. The eye thresholds (eyes.py) work on the driver's own calibrated scale.
 state.json gets only the keys useful for the LLM / dashboard (state.new_state); the rest stays internal.
 """
 import csv           # for the optional debug log
@@ -33,6 +34,7 @@ import mediapipe as mp
 import numpy as np
 from mediapipe.tasks.python import BaseOptions, vision
 
+import eyes
 import gaze
 import objects
 from alerts import AlertEngine
@@ -73,35 +75,25 @@ ZONE_POSES = [
     ("bord", "Priveste BORDUL / TELEFONUL din poala (jos)"),
 ]
 CALIB_FILE = "calib.json"
-CALIB_VERSION = 9          # v9: resting jaw + normal eye opening + lower eye-closed threshold -> recalibrates once
+CALIB_VERSION = 10         # v10: eyes rebuilt (open / closed / looking-down references) -> recalibrates once
 CALIB_SECONDS = 4          # TUNE: duration of the ROAD pose (eyes open, neutral posture)
 CALIB_CLOSED_SECONDS = 3   # TUNE: duration of the final pose: eyes closed (between the two beeps)
 POSE_SECONDS = 2.5         # TUNE: duration of each gaze-zone pose
 PREP_SECONDS = 3.0         # TUNE: pause before each pose: shows what comes next + countdown, nothing is measured
-EYE_OPEN_K = 0.15          # TUNE: eye-closed threshold = closed + K * (open - closed) (~35% of the normal
-                           #       opening). It must stay well below PARTIAL_RATIO (50%, gaze.py), so that
-                           #       "partially closed" (35-50%) exists. Lower = harder to count as closed
-EYE_OPEN_MIN, EYE_OPEN_MAX = 0.20, 0.70   # TUNE: clamp for the calibrated eye-closed threshold
-CLOSED_MIN_S = 0.07        # TUNE: eyes must stay below the threshold this long to count as closed
-CLOSED_MIN_FRAMES = 2      # TUNE: ...but never fewer frames than this (filters single-frame noise)
 
-# --- EYES vs HEAD POSE ---
-BLINK_BS_CLOSED = 0.55     # TUNE: eyeBlink blendshape above this = that eye is closing (second opinion
-                           #       for a single closed eye / wink, where the iris ratio is less reliable)
+# --- EYES vs HEAD POSE (the eye thresholds themselves are in eyes.py) ---
 YAW_TURNED = 25.0          # TUNE: head turned more than this: a single closed eye is just the far eye hidden
 YAW_EYES_MAX = 45.0        # TUNE: eyes are still checked up to this head yaw; beyond it one eye is hidden.
                            #       (A sleeping driver whose head falls sideways is still caught up to here.)
-LOOK_DOWN_BS = 0.45        # TUNE: eyeLookDown blendshape above this = looking down (phone / dashboard)
-LOOK_DOWN_RELAX = 0.6      # TUNE: while looking down, an eye counts as closed only below threshold * this
-                           #       (not applied while an eye is clearly closing: a wink is not looking down)
+HEAD_DOWN_FRAC = 0.5       # TUNE: head pitched down at least this fraction of the "bord" pose = looking down
+                           #       (used only if the head moved at least 8 degrees at the "bord" pose)
 
 # calibrated values (defaults until calibration)
 JAW_BASE = 0.0             # resting jawOpen (mouth closed), from calibration
-EYE_OPEN_REF = None        # normal eye opening (eyes open, looking at the road), from calibration
+EYE_CAL = eyes.EyeCalib()  # eye opening open / closed / looking down + iris position, from calibration
 YAW_BASE = PITCH_BASE = ROLL_BASE = 0.0
 GAZE_CAL = gaze.GazeCalib()
 ZONE_MODEL = gaze.ZoneModel.default()
-EYE_OPEN_CLOSED = gaze.EYE_OPEN_CLOSED
 CALIBRATED = False
 
 # --- SPEED / OUTPUT ---
@@ -113,8 +105,8 @@ DRAW_MESH = True           # TUNE: draw all 478 face points (key m). Off = a few
 OBJECT_DETECTION = True    # TUNE: YOLO phone / bottle / cup (needs `ultralytics`; off = faster)
 DEBUG_LOG = True           # TUNE: write raw driver values for every frame to debug_log.csv (for tuning)
 DEBUG_LOG_FILE = "debug_log.csv"
-DEBUG_FIELDS = ["t", "fps", "open_r", "open_l", "eye_pct", "eye_thr", "blink_l", "blink_r", "look_down",
-                "closed", "one_eye", "jaw", "jaw_base",
+DEBUG_FIELDS = ["t", "fps", "open_r", "open_l", "r_r", "r_l", "state_r", "state_l", "eye_pct", "blink_l", "blink_r",
+                "iris_drop", "looking_down", "blink_now", "closed", "one_eye", "partial", "jaw", "jaw_base",
                 "yawning", "yaw", "pitch", "roll", "gaze_h", "gaze_v", "zone", "zone_dist",
                 "hand_near_face", "hand_at_ear", "phone", "alert_level", "alert_reason"]
 
@@ -253,7 +245,7 @@ def write_state(state):
 #  CALIBRATION
 # ============================================================================
 def load_calib():
-    global JAW_BASE, YAW_BASE, PITCH_BASE, ROLL_BASE, GAZE_CAL, EYE_OPEN_CLOSED, EYE_OPEN_REF, ZONE_MODEL, CALIBRATED
+    global JAW_BASE, YAW_BASE, PITCH_BASE, ROLL_BASE, GAZE_CAL, EYE_CAL, ZONE_MODEL, CALIBRATED
     if not os.path.exists(CALIB_FILE):
         return False
     try:
@@ -262,19 +254,19 @@ def load_calib():
         if c.get("version") != CALIB_VERSION or not c.get("zones"):
             print("calib.json e de la o versiune mai veche -> recalibrez.")
             return False
-        JAW_BASE = c.get("jaw_base", 0.0)          # older calib files: no resting value -> 0
-        EYE_OPEN_REF = c.get("eye_open_ref")       # older calib files: estimated live
+        JAW_BASE = c["jaw_base"]
+        EYE_CAL = eyes.EyeCalib(c["eye_open_ref"], c["eye_closed_ref"], c.get("eye_down_ref"),
+                                c.get("iris_drop_road"), c.get("iris_drop_down"))
         YAW_BASE, PITCH_BASE = c["yaw_base"], c["pitch_base"]
         ROLL_BASE = c.get("roll_base", 0.0)
         GAZE_CAL = gaze.GazeCalib(c["gaze_h0"], c["gaze_v0"])
-        EYE_OPEN_CLOSED = c["eye_open_closed"]
         ZONE_MODEL = gaze.ZoneModel(c["zones"])
     except (KeyError, ValueError, TypeError):
         print("calib.json corupt -> recalibrez.")
         return False
     CALIBRATED = True
-    print(f"Calibrare incarcata: ochi inchisi sub {EYE_OPEN_CLOSED:.2f}  gura repaus {JAW_BASE:.2f}  "
-          f"cap drept: yaw {YAW_BASE:+.0f} pitch {PITCH_BASE:+.0f} roll {ROLL_BASE:+.0f}  "
+    print(f"Calibrare incarcata: ochi deschis {EYE_CAL.open_ref:.2f} / inchis {EYE_CAL.closed_ref:.2f}  "
+          f"gura repaus {JAW_BASE:.2f}  cap drept: yaw {YAW_BASE:+.0f} pitch {PITCH_BASE:+.0f} roll {ROLL_BASE:+.0f}  "
           f"zone: {', '.join(ZONE_MODEL.zones)}")
     return True
 
@@ -309,7 +301,7 @@ def _prepare(cap, face, seconds, text):
 
 def _collect(cap, face, seconds, text, skip=0.0):
     """Collect per-frame measurements for `seconds`; the first `skip` seconds are ignored."""
-    data = {"jaw": [], "yaw": [], "pitch": [], "roll": [], "gaze_h": [], "gaze_v": [], "open": []}
+    data = {"jaw": [], "yaw": [], "pitch": [], "roll": [], "gaze_h": [], "gaze_v": [], "open": [], "drop": []}
     t_start = time.time()
     t_end = t_start + seconds
     while time.time() < t_end:
@@ -336,9 +328,12 @@ def _collect(cap, face, seconds, text, skip=0.0):
                 if g:
                     data["gaze_h"].append(g[0])
                     data["gaze_v"].append(g[1])
-                op = gaze.eye_openness(xy)                   # iris-based openness, both eyes pooled
+                op = eyes.eye_openness(xy)                   # iris-based openness, both eyes pooled
                 if op is not None:
                     data["open"].extend(op)
+                drop = eyes.iris_drop(xy)                    # iris vs eye corners (looking down)
+                if drop is not None:
+                    data["drop"].append(drop)
         left = int(t_end - time.time()) + 1
         cv2.putText(frame, f"{text}  {left}s", (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
         cv2.putText(frame, "q = anuleaza calibrarea", (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
@@ -356,7 +351,7 @@ def calibrate(cap, face):
     yaw/pitch + iris position, so it works whether the driver turns the head or only the eyes.
     Each pose starts with a PREP_SECONDS pause and a beep. q = cancel at any time.
     """
-    global JAW_BASE, YAW_BASE, PITCH_BASE, ROLL_BASE, GAZE_CAL, EYE_OPEN_CLOSED, EYE_OPEN_REF, ZONE_MODEL, CALIBRATED
+    global JAW_BASE, YAW_BASE, PITCH_BASE, ROLL_BASE, GAZE_CAL, EYE_CAL, ZONE_MODEL, CALIBRATED
     print("\n=== SCANARE COMPLETA ===")
     n_steps = len(ZONE_POSES) + 2
     poses = [("front", CALIB_SECONDS, f"1/{n_steps} PRIVESTE DRUMUL (drept), ochii deschisi, gura inchisa")]
@@ -398,20 +393,18 @@ def calibrate(cap, face):
     h0, v0 = med(front["gaze_h"], 0.5), med(front["gaze_v"], 0.5)
     GAZE_CAL = gaze.GazeCalib(h0, v0)
 
-    # --- eye-closed threshold from iris openness: ROAD (open) vs CLOSED ---
+    # --- eyes: opening open (road pose), closed (closed pose), looking down (bord pose) ---
+    down = got.get("bord") or {"open": [], "drop": []}
+    o_ref, c_ref = med(front["open"], None), med(closed["open"], None)
     sep = separation(front["open"], closed["open"])
-    if sep is not None and sep > 0:
-        open_med, closed_med = med(front["open"], 0.9), med(closed["open"], 0.15)
-        EYE_OPEN_REF = open_med                # "100% open" for eye_openness_pct / partially closed
-        EYE_OPEN_CLOSED = float(np.clip(closed_med + EYE_OPEN_K * (open_med - closed_med),
-                                        EYE_OPEN_MIN, EYE_OPEN_MAX))
-        print(f"Deschidere ochi: deschis {open_med:.2f}  inchis {closed_med:.2f}  "
-              f"-> prag {EYE_OPEN_CLOSED:.2f}  (separare {sep:.1f})")
-        if sep < 2:
-            print("ATENTIE: separare mica -> apasa c si reia la lumina mai buna.")
-    else:
-        EYE_OPEN_CLOSED = gaze.EYE_OPEN_CLOSED
-        print(f"ATENTIE: deschis/inchis nu se deosebesc -> prag implicit {EYE_OPEN_CLOSED:.2f}")
+    if o_ref is None or c_ref is None or o_ref - c_ref < 0.05:
+        print("ATENTIE: ochii deschisi / inchisi nu se deosebesc -> apasa c si reia (lumina, fata in cadru).")
+        o_ref, c_ref = (o_ref or 0.7), (0.3 * (o_ref or 0.7))
+    EYE_CAL = eyes.EyeCalib(o_ref, c_ref, med(down["open"], None), med(front["drop"], None), med(down["drop"], None))
+    print(f"Ochi: deschis {o_ref:.2f}  inchis {c_ref:.2f}  la bord {EYE_CAL.down_ref or 0:.2f}"
+          + (f"  (separare {sep:.1f})" if sep is not None else ""))
+    if sep is not None and sep < 2:
+        print("ATENTIE: separare mica intre ochi deschisi si inchisi -> apasa c si reia la lumina mai buna.")
 
     # --- gaze zones: head yaw/pitch (relative to the road pose) + iris, per zone ---
     zones = {gaze.ROAD_ZONE: (0.0, 0.0, h0, v0)}
@@ -430,11 +423,14 @@ def calibrate(cap, face):
     CALIBRATED = True
 
     with open(CALIB_FILE, "w") as f:
-        json.dump({"version": CALIB_VERSION, "jaw_base": JAW_BASE, "eye_open_ref": EYE_OPEN_REF,
+        json.dump({"version": CALIB_VERSION, "jaw_base": JAW_BASE,
+                   "eye_open_ref": EYE_CAL.open_ref, "eye_closed_ref": EYE_CAL.closed_ref,
+                   "eye_down_ref": EYE_CAL.down_ref, "iris_drop_road": EYE_CAL.drop_road,
+                   "iris_drop_down": EYE_CAL.drop_down,
                    "yaw_base": YAW_BASE, "pitch_base": PITCH_BASE, "roll_base": ROLL_BASE,
-                   "gaze_h0": h0, "gaze_v0": v0, "eye_open_closed": EYE_OPEN_CLOSED,
+                   "gaze_h0": h0, "gaze_v0": v0,
                    "zones": ZONE_MODEL.to_json()}, f, indent=2)
-    print(f"Gata. ochi<{EYE_OPEN_CLOSED:.2f}  gura repaus {JAW_BASE:.2f} (deschisa >{JAW_BASE + MOUTH_OPEN_DELTA:.2f}, "
+    print(f"Gata. gura repaus {JAW_BASE:.2f} (deschisa >{JAW_BASE + MOUTH_OPEN_DELTA:.2f}, "
           f"cascat >{JAW_BASE + YAWN_DELTA:.2f})  "
           f"cap drept: yaw {YAW_BASE:+.0f} pitch {PITCH_BASE:+.0f} roll {ROLL_BASE:+.0f}\n")
 
@@ -495,9 +491,9 @@ def main():
     print(f"Detectie obiecte (YOLO): {detector.status}")
 
     def new_trackers():
-        return gaze.GazeTracker(GAZE_CAL), gaze.BlinkTracker(EYE_OPEN_REF), HeadTracker()
+        return gaze.GazeTracker(GAZE_CAL), eyes.EyeTracker(EYE_CAL), HeadTracker()
 
-    gaze_tracker, blink_tracker, head_tracker = new_trackers()
+    gaze_tracker, eye_tracker, head_tracker = new_trackers()
     hand_tracker, health, alerts = HandFaceTracker(), CameraHealth(), AlertEngine()
     hand_filter = HandFilter()
 
@@ -508,7 +504,6 @@ def main():
     frame_no, hand_res = 0, None
     driver_id = None              # stable ID of the current driver
     last_face_seen = t_start      # for face_lost_sec
-    closed_frames = 0             # debounce of "both eyes below the threshold" (driver only)
     yawn_since = None
     prof = {}
     dbg_file = dbg_writer = None
@@ -553,7 +548,8 @@ def main():
         t_draw = time.perf_counter()
 
         raw_hands = [[(p.x * w, p.y * h) for p in pts] for pts in hand_res.hand_landmarks]
-        hand_scores = [hd[0].score if hd else 0.0 for hd in (hand_res.handedness or [[]] * len(raw_hands))]
+        hand_scores = [getattr(hd[0], "score", 1.0) if hd else 0.0
+                       for hd in (hand_res.handedness or [[]] * len(raw_hands))]
 
         # ---------- faces: pick the driver (largest face, sticky) ----------
         lms = face_res.face_landmarks
@@ -569,8 +565,8 @@ def main():
             driver = cur if (cur is not None and areas[biggest] < DRIVER_SWITCH_RATIO * areas[cur]) else biggest
             if ids[driver] != driver_id:
                 if driver_id in ids:              # a different person (still in view) became the driver
-                    gaze_tracker, blink_tracker, head_tracker = new_trackers()
-                    closed_frames, yawn_since = 0, None
+                    gaze_tracker, eye_tracker, head_tracker = new_trackers()
+                    yawn_since = None
                 driver_id = ids[driver]
 
         for idx, pts in enumerate(lms):           # passengers: box + label only
@@ -586,7 +582,7 @@ def main():
         state["face_found"] = driver is not None
         state["passenger_count"] = max(0, n_faces - 1)
         state.update(cam)
-        gm = bm = None
+        gm = em = None
         xy = None
         hands_px = hand_filter.update(raw_hands, hand_scores,
                                       [(p.x * w, p.y * h) for p in lms[driver]] if driver is not None else None)
@@ -613,34 +609,24 @@ def main():
             else:
                 yaw_d = pitch_d = roll_d = 0.0
 
-            # eyes: openness from the iris, per eye
+            # eyes (eyes.py): per-eye opening on the driver's own scale -> open / half / closed, one eye,
+            # blinks, microsleep. "Looking down" comes from the iris vs the eye corners + the head pitch,
+            # never from the eyelids (drooping eyelids look the same as looking down).
             eyes_hidden = abs(yaw_d) > YAW_EYES_MAX
             blink_l, blink_r = (bs.get("eyeBlinkLeft", 0.0), bs.get("eyeBlinkRight", 0.0)) if bs else (0.0, 0.0)
-            closing_l, closing_r = blink_l >= BLINK_BS_CLOSED, blink_r >= BLINK_BS_CLOSED
-            look_down_score = (bs.get("eyeLookDownLeft", 0.0) + bs.get("eyeLookDownRight", 0.0)) / 2 if bs else 0.0
-            # looking down lowers the eyelids; but if an eye is clearly closing (wink / blink), it is not
-            # "looking down" (the blendshape model raises eyeLookDown when an eye closes)
-            look_down = look_down_score > LOOK_DOWN_BS and not (closing_l or closing_r)
-            op = gaze.eye_openness(xy)
-            thr = EYE_OPEN_CLOSED * (LOOK_DOWN_RELAX if look_down else 1.0)
-            if op is not None and not eyes_hidden:
-                ce_r, ce_l = op[0] < thr, op[1] < thr
-                below = ce_r and ce_l                    # "eyes closed" = BOTH (one eye = blink/wink)
-                # one eye: from the iris, or from the blink blendshapes (catches the eye where the iris
-                # ratio does not drop enough); a turned head just hides the far eye
-                wink_bs = closing_l != closing_r and min(blink_l, blink_r) < 0.3
-                one_eye = ((ce_r != ce_l) or wink_bs) and not below and abs(yaw_d) <= YAW_TURNED
-            else:
-                below = one_eye = False
-            closed_frames = closed_frames + 1 if below else 0
-            need = max(CLOSED_MIN_FRAMES, round(CLOSED_MIN_S * fps)) if fps else CLOSED_MIN_FRAMES
-            closed = closed_frames >= need
-            openness = (op[0] + op[1]) / 2 if op is not None else None
+            op = eyes.eye_openness(xy)
+            drop = eyes.iris_drop(xy)
+            bord = ZONE_MODEL.zones.get("bord")
+            head_down = bool(bord and abs(bord[1]) >= 8 and
+                             pitch_d * ZONE_MODEL.down_sign >= HEAD_DOWN_FRAC * abs(bord[1]))
+            em = eye_tracker.update(now, op, (blink_l, blink_r) if bs else None, drop, head_down,
+                                    hidden=eyes_hidden, turned=abs(yaw_d) > YAW_TURNED)
+            closed, one_eye = em["closed"], em["one_eye"]
 
             # gaze zone (head + eyes; head only while the eyes are closed)
             g = gaze.gaze_ratios(xy)
             zone, zone_dist = ZONE_MODEL.classify(yaw_d, pitch_d, g if (g and not closed) else None,
-                                                  prefer=gaze_tracker.zone)   # sticky current zone
+                                                  prefer=gaze_tracker.zone)   # current zone is kept more easily
 
             # mouth / yawn (jawOpen with hysteresis)
             jaw = bs.get("jawOpen") if bs else None
@@ -654,13 +640,12 @@ def main():
             yawning = wide and now - yawn_since >= YAWN_MIN_S
 
             # trackers
-            bm = blink_tracker.update(now, closed=closed, openness=openness, one_eye=one_eye)
             gm = gaze_tracker.update(now, g, eyes_open=not closed, zone=zone,
-                                     blinks_per_min=bm["blinks_per_min"], warmed_up=bm["warmed_up"])
+                                     blinks_per_min=em["blinks_per_min"], warmed_up=em["warmed_up"])
             hm = head_tracker.update(now, yaw_d, pitch_d, roll_d, closed, ZONE_MODEL.down_sign)
 
             state.update({
-                "eyes_closed_sec": round(bm["closed_sec"], 1),
+                "eyes_closed_sec": round(em["closed_sec"], 1),
                 "one_eye_closed": one_eye,
                 "yawning": yawning,
                 "head_drop": hm["head_drop"], "head_nods_1min": hm["head_nods_1min"], "head_tilt": hm["head_tilt"],
@@ -668,17 +653,20 @@ def main():
                 "on_road_ratio": gm["on_road_ratio"], "mirror_checks": gm["mirror_checks"],
                 "mirror_too_long": gm["mirror_too_long"], "long_glance": gm["long_glance"], "hypnosis": gm["hypnosis"],
             })
-            for k in ("blink_rate", "slow_blinks", "perclos", "perclos_drowsy", "microsleep", "sleep",
-                      "eyes_partially_closed"):
-                state[k] = bm[k]
-            if bm["eye_openness_pct"] is not None:
-                state["eye_openness_pct"] = bm["eye_openness_pct"]
+            for k in ("blink_rate", "slow_blinks", "perclos", "perclos_drowsy", "microsleep", "sleep"):
+                state[k] = em[k]
+            state["eyes_partially_closed"] = em["partial"]
+            if em["pct"] is not None:
+                state["eye_openness_pct"] = em["pct"]
 
             # driver overlay
-            eye_col = (150, 150, 150) if eyes_hidden else ((0, 0, 255) if closed else (0, 255, 255))
-            for eye in (LEFT_EYE, RIGHT_EYE):
+            state_col = {"open": (0, 255, 0), "half": (0, 220, 255), "closed": (0, 0, 255)}
+            eye_col = ((150, 150, 150) if eyes_hidden else (0, 0, 255) if closed else
+                       (0, 200, 255) if (one_eye or em["partial"]) else (0, 255, 255))
+            for k, eye in enumerate((LEFT_EYE, RIGHT_EYE)):   # LEFT_EYE = points 33..133 = eye 0 ("right")
+                col = state_col[em["states"][k]] if em["states"] else (150, 150, 150)
                 poly = np.array([[int(xy[i][0]), int(xy[i][1])] for i in eye], np.int32)
-                cv2.polylines(frame, [poly], True, eye_col, 1)
+                cv2.polylines(frame, [poly], True, col, 2)
             for i in IRIS_POINTS:
                 cv2.circle(frame, (int(xy[i][0]), int(xy[i][1])), 1, (255, 255, 0), -1)
             mouth_col = (0, 0, 255) if yawning else (0, 165, 255) if wide else (0, 255, 255) if mouth_open else (0, 255, 0)
@@ -687,12 +675,14 @@ def main():
             cv2.line(frame, mt, mb, mouth_col, 2)
             cv2.line(frame, ml, mr, mouth_col, 2)
 
-            eye_state = ("n/a (cap intors)" if eyes_hidden else "INCHISI" if closed else
-                         "un ochi inchis" if one_eye else
-                         "PARTIAL INCHISI" if bm["eyes_partially_closed"] else
-                         "deschisi (privire jos)" if look_down else "deschisi")
-            pct = bm["eye_openness_pct"]
-            eye_val = (f"{pct}%  " if pct is not None else "") + (f"R{op[0]:.2f} L{op[1]:.2f}" if op is not None else "-")
+            eye_state = ("n/a (cap intors)" if eyes_hidden else
+                         f"INCHISI {em['closed_sec']:.1f}s" if closed else
+                         f"un ochi inchis {em['one_eye_sec']:.1f}s" if one_eye else
+                         "PE JUMATATE INCHISI" if em["partial"] else
+                         "deschisi (privire jos)" if em["looking_down"] else "deschisi")
+            pct = em["pct"]
+            per_eye = (f"R{em['r'][0] * 100:.0f}% L{em['r'][1] * 100:.0f}%" if em["r"] else "-")
+            eye_val = (f"{pct}% ({per_eye})" if pct is not None else per_eye)
             put(frame, f"Sofer  cap yaw {yaw_d:+.0f} pitch {pitch_d:+.0f} roll {roll_d:+.0f}", (x0, y0 - 68), (255, 255, 255))
             put(frame, f"Ochi {eye_val} - {eye_state}", (x0, y0 - 48), eye_col)
             put(frame, f"Privire: {gm['direction'] or 'pe drum'}", (x0, y0 - 28), (255, 255, 0))
@@ -700,15 +690,24 @@ def main():
             jaw_above = (jaw - JAW_BASE) if jaw is not None else 0.0
             put(frame, f"Gura {jaw_above:.2f} (deschisa >{MOUTH_OPEN_DELTA:.2f}, cascat >{YAWN_DELTA:.2f}) - {mouth_txt}",
                 (x0, y0 - 8), mouth_col)
-            closure_txt = (f"OCHI INCHISI {bm['closed_sec']:.1f}s" if bm["closed_sec"] > 0 else
-                           f"ultimul clipit acum {bm['since_last_blink']:.0f}s")
-            put(frame, closure_txt, (x0, y1 + 20), eye_col)
+            if closed:                                 # big and red while the eyes are closed, with the duration
+                put(frame, f"OCHI INCHISI {em['closed_sec']:.1f}s", (x0, y1 + 28), (0, 0, 255), 0.9, 3)
+            elif one_eye:
+                put(frame, f"un ochi inchis {em['one_eye_sec']:.1f}s", (x0, y1 + 24), (0, 200, 255), 0.6, 2)
+            elif em["partial"]:
+                put(frame, "OCHI PE JUMATATE INCHISI", (x0, y1 + 24), (0, 200, 255), 0.6, 2)
+            else:
+                put(frame, f"clipiri/min {em['blink_rate']}  ultimul clipit acum {em['since_last_blink']:.0f}s",
+                    (x0, y1 + 20), eye_col)
             draw_gaze_panel(frame, gm, w - 206, 72)
 
             dbg = {"open_r": round(op[0], 3) if op else "", "open_l": round(op[1], 3) if op else "",
-                   "eye_pct": pct if pct is not None else "", "eye_thr": round(thr, 3),
-                   "blink_l": round(blink_l, 2), "blink_r": round(blink_r, 2),
-                   "look_down": round(look_down_score, 3), "closed": int(closed), "one_eye": int(one_eye),
+                   "r_r": round(em["r"][0], 2) if em["r"] else "", "r_l": round(em["r"][1], 2) if em["r"] else "",
+                   "state_r": em["states"][0] if em["states"] else "", "state_l": em["states"][1] if em["states"] else "",
+                   "eye_pct": pct if pct is not None else "", "blink_l": round(blink_l, 2), "blink_r": round(blink_r, 2),
+                   "iris_drop": round(drop, 3) if drop is not None else "", "looking_down": int(em["looking_down"]),
+                   "blink_now": int(em["blink_now"]), "closed": int(closed), "one_eye": int(one_eye),
+                   "partial": int(em["partial"]),
                    "jaw": round(jaw, 3) if jaw is not None else "", "jaw_base": round(JAW_BASE, 3),
                    "yawning": int(yawning), "yaw": round(yaw_d, 1), "pitch": round(pitch_d, 1),
                    "roll": round(roll_d, 1), "gaze_h": round(g[0], 3) if g else "",
@@ -782,8 +781,8 @@ def main():
             break
         if key == ord("c"):
             calibrate(cap, face)
-            gaze_tracker, blink_tracker, head_tracker = new_trackers()
-            closed_frames, yawn_since = 0, None
+            gaze_tracker, eye_tracker, head_tracker = new_trackers()
+            yawn_since = None
         if key == ord("l"):
             USE_CLAHE = not USE_CLAHE
         if key == ord("m"):

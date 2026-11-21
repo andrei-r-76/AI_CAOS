@@ -11,8 +11,7 @@ What lives here:
      the driver looks naturally (head + eyes) at each zone and the nearest zone wins live.
   2) GazeTracker: attention metrics over time (eyes-on-road ratio, long glance, mirror checks,
      fixation / highway hypnosis).
-  3) eye_openness + BlinkTracker: eyes closed, partially closed, blinks, PERCLOS, microsleep.
-     BlinkTracker is the ONLY place where closures and blinks are timed and counted.
+  (All eye opening / closing / blink logic lives in eyes.py.)
 
 TUNING NOTE: every line marked "TUNE:" is a value you can adjust. All times are in seconds.
 """
@@ -30,28 +29,28 @@ EYES = [
     {"corners": (362, 263), "lids": (386, 374), "iris": 473, "ring": [474, 475, 476, 477]},  # left eye
 ]
 
-# --- eyes closed from the iris ---
-EYE_OPEN_CLOSED = 0.45     # default eye-closed threshold; face_basic.py calibrates it per driver
-
 # --- gaze zones (head + eyes) ---
 ROAD_ZONE = "drum"
 MIRROR_ZONES = ("oglinda_stanga", "oglinda_dreapta", "oglinda_mijloc")
-ZONE_SCALE = {"yaw": 8.0, "pitch": 6.0, "h": 0.06, "v": 0.10}   # TUNE: how much each feature may vary
-                           #   inside one zone (degrees for the head, iris ratio for the eyes).
-                           #   Bigger = that feature matters less. Raise h/v if the iris is noisy.
-ZONE_MAX_DIST = 2.5        # TUNE: farther than this from every zone -> generic label from the head
-                           #   (stanga/dreapta/sus/jos), or the road if the head is roughly straight
+ZONE_SCALE = {"yaw": 8.0, "pitch": 6.0, "h": 0.06, "v": 0.10}   # TUNE: how the features are weighed
+                           #   (degrees for the head, iris ratio for the eyes). Bigger = that feature
+                           #   matters less. Raise h/v if the iris is noisy.
+# A zone is chosen by DIRECTION, not by the nearest point: real glances are quicker and smaller than
+# the deliberate calibration pose (head turned 33 deg at calibration, maybe 15 deg while driving).
+ZONE_REACH = 0.45          # TUNE: the gaze must go at least this fraction of the way from the road to the
+                           #   calibrated zone (0.45 = less than half of the calibration movement is enough)
+ZONE_KEEP = 0.30           # TUNE: once in a zone, stay there until the gaze is back below this fraction
+ZONE_COS_MIN = 0.75        # TUNE: the movement must point towards the zone (cosine; 0.75 = within ~40 deg)
 ZONE_HEAD_YAW = 20.0       # TUNE: for the generic label: head yaw beyond this = looking sideways
 ZONE_HEAD_PITCH = 15.0     # TUNE: for the generic label: head pitch beyond this = looking up/down
+MIRROR_CONFIRM_S = 0.15    # TUNE: mirror glances are quick (0.3-0.8 s): a mirror zone is confirmed sooner
 ZONE_CONFIRM_S = 0.35      # TUNE: "awareness delay": a new zone must hold this long before the gaze is
                            #   considered moved there (no instant jumps bord -> oglinda -> drum). The
                            #   glance timing is backdated to when it really started, so durations stay exact
-ZONE_STICKY_MARGIN = 0.6   # TUNE: stay in the current zone unless another zone is closer by more than this
-                           #   (hysteresis: no flicker on the border between two zones)
 
 # --- attention time windows ---
 LONG_GLANCE_S = 3.0        # TUNE: one continuous glance away this long = long distraction
-MIRROR_MIN_S = 0.25        # TUNE: shortest glance that can be a mirror check
+MIRROR_MIN_S = 0.20        # TUNE: shortest glance that can be a mirror check
 MIRROR_ZONE_MAX_S = 2.0    # TUNE: a mirror glance up to this long = mirror check; longer = mirror_too_long
 MIRROR_DEBOUNCE_S = 0.8    # minimum time between two counted mirror checks
 ONROAD_WINDOW = 30.0       # window for the eyes-on-road ratio
@@ -95,27 +94,43 @@ class ZoneModel:
         """No calibration yet: only the road, everything else from the head (left/right sign unknown)."""
         return cls({ROAD_ZONE: (0.0, 0.0, None, None)})
 
+    def _vec(self, yaw, pitch, h, v, use_iris):
+        """Scaled feature vector relative to the road pose (iris parts only when both sides have them)."""
+        ry, rp, rh, rv = self.zones[ROAD_ZONE]
+        out = [(yaw - ry) / ZONE_SCALE["yaw"], (pitch - rp) / ZONE_SCALE["pitch"]]
+        if use_iris:
+            out += [(h - rh) / ZONE_SCALE["h"], (v - rv) / ZONE_SCALE["v"]]
+        return np.array(out)
+
     def classify(self, yaw, pitch, gaze=None, prefer=None):
-        """Returns (zone_name, distance). gaze=None (eyes closed / no iris) -> head only.
-        prefer = the current zone: it is kept unless another zone is closer by ZONE_STICKY_MARGIN."""
-        dists = {}
+        """Returns (zone_name, reach). reach = how far the gaze went towards that zone (1.0 = like at
+        calibration). gaze=None (eyes closed / no iris) -> head only.
+        A zone wins when the movement from the road points towards it (cosine >= ZONE_COS_MIN) and covers
+        at least ZONE_REACH of the calibrated movement; prefer (= the current zone) only needs ZONE_KEEP."""
+        road = self.zones[ROAD_ZONE]
+        best, best_cos, best_reach = ROAD_ZONE, -1.0, 0.0
         for name, (zy, zp, zh, zv) in self.zones.items():
-            d = ((yaw - zy) / ZONE_SCALE["yaw"]) ** 2 + ((pitch - zp) / ZONE_SCALE["pitch"]) ** 2
-            if gaze is not None and zh is not None and zv is not None:
-                d += ((gaze[0] - zh) / ZONE_SCALE["h"]) ** 2 + ((gaze[1] - zv) / ZONE_SCALE["v"]) ** 2
-            dists[name] = math.sqrt(d)
-        best = min(dists, key=dists.get)
-        best_d = dists[best]
-        if prefer in dists and dists[prefer] <= ZONE_MAX_DIST and dists[prefer] <= best_d + ZONE_STICKY_MARGIN:
-            best, best_d = prefer, dists[prefer]
-        if best_d <= ZONE_MAX_DIST:
-            return best, best_d
-        # far from every calibrated zone: generic direction from the head alone
+            if name == ROAD_ZONE:
+                continue
+            use_iris = gaze is not None and None not in (zh, zv, road[2], road[3])
+            z = self._vec(zy, zp, zh, zv, use_iris)
+            u = self._vec(yaw, pitch, *(gaze if use_iris else (0.0, 0.0)), use_iris)
+            zz = float(z @ z)
+            if zz < 1e-6:
+                continue
+            reach = float(u @ z) / zz                     # projection: fraction of the way to the zone
+            cos = float(u @ z) / (np.linalg.norm(u) * math.sqrt(zz) + 1e-9)
+            need = ZONE_KEEP if name == prefer else ZONE_REACH
+            if reach >= need and cos >= ZONE_COS_MIN and cos > best_cos:
+                best, best_cos, best_reach = name, cos, reach
+        if best != ROAD_ZONE:
+            return best, best_reach
+        # no calibrated zone in that direction: generic direction from the head alone
         if abs(yaw) >= ZONE_HEAD_YAW and abs(yaw) >= abs(pitch):
-            return ("stanga" if yaw * self.left_sign > 0 else "dreapta"), best_d
+            return ("stanga" if yaw * self.left_sign > 0 else "dreapta"), 0.0
         if abs(pitch) >= ZONE_HEAD_PITCH:
-            return ("jos" if pitch * self.down_sign > 0 else "sus"), best_d
-        return ROAD_ZONE, best_d                 # head roughly straight: trust the road (iris noise)
+            return ("jos" if pitch * self.down_sign > 0 else "sus"), 0.0
+        return ROAD_ZONE, 0.0
 
     def to_json(self):
         return {k: list(v) for k, v in self.zones.items()}
@@ -140,21 +155,6 @@ def gaze_ratios(xy):
     return float(np.mean(hs)), float(np.mean(vs))
 
 
-def eye_openness(xy):
-    """Per eye: vertical opening / iris diameter. Returns (right, left) or None."""
-    if len(xy) < 478:
-        return None
-    out = []
-    for e in EYES:
-        lt, lb = e["lids"]
-        center = np.array(xy[e["iris"]])
-        lid = float(np.hypot(xy[lt][0] - xy[lb][0], xy[lt][1] - xy[lb][1]))
-        diam = 2.0 * float(np.mean([np.hypot(xy[r][0] - center[0], xy[r][1] - center[1])
-                                    for r in e["ring"]]))
-        out.append(lid / diam if diam > 1e-3 else 0.0)
-    return out[0], out[1]
-
-
 class GazeTracker:
     """Attention metrics for the DRIVER (a single person), over time windows."""
 
@@ -173,7 +173,7 @@ class GazeTracker:
 
     def update(self, t, gaze, eyes_open, zone, blinks_per_min=None, warmed_up=False):
         """gaze: iris (h, v) or None; zone: raw zone from ZoneModel.classify for this frame;
-        blinks_per_min / warmed_up: from BlinkTracker (used for highway hypnosis)."""
+        blinks_per_min / warmed_up: from eyes.EyeTracker (used for highway hypnosis)."""
         cal = self.cal
         has_gaze = gaze is not None and eyes_open
         if has_gaze:
@@ -195,7 +195,8 @@ class GazeTracker:
         else:
             if raw != self.cand:
                 self.cand, self.cand_since = raw, t
-            if t - self.cand_since >= ZONE_CONFIRM_S:
+            confirm = MIRROR_CONFIRM_S if self.cand in MIRROR_ZONES else ZONE_CONFIRM_S
+            if t - self.cand_since >= confirm:
                 self.zone, te, self.cand = self.cand, self.cand_since, None
         zone = self.zone
         away = zone != ROAD_ZONE
@@ -273,106 +274,4 @@ class GazeTracker:
             "long_glance": away_sec >= LONG_GLANCE_S,
             "mirror_checks": len(self.mirrors), "mirror_too_long": mirror_too_long,
             "fixation_s": round(fixation_s, 1), "hypnosis": hypnosis,
-        }
-
-
-# ============================================================================
-#  FATIGUE from the eyes: closures, partial closure, blinks, microsleep, PERCLOS
-# ============================================================================
-MICROSLEEP_S = 1.0         # TUNE: eyes closed 1-3 s = microsleep
-SLEEP_S = 3.0              # TUNE: eyes closed over 3 s = asleep
-PERCLOS_WINDOW = 60.0      # PERCLOS over the last 60 s
-PERCLOS_DROWSY = 0.15      # TUNE: more than 15% of the time with eyes closed = drowsy
-SLOW_BLINK_S = 0.40        # TUNE: blinks longer than this = slow/heavy (a sign of fatigue)
-PARTIAL_RATIO = 0.50       # TUNE: eye opening at or below 50% of the driver's normal (calibrated) opening,
-                           #       but not closed = eyes PARTIALLY closed (heavy eyelids)
-PARTIAL_MIN_S = 0.5        # TUNE: ...sustained this long (a blink is shorter)
-OPEN_REF_WINDOW = 60.0     # without calibration: "normal opening" estimated over this window...
-OPEN_REF_PCT = 90          # ...as this percentile (robust to outliers, unlike max)
-WARMUP_S = 20.0            # blink-rate based judgements (hypnosis) need at least this much data
-
-
-class BlinkTracker:
-    """Fatigue metrics from the (confirmed) eye state + eye openness. The single source of truth
-    for closures: eyes_closed_sec, since_last_blink, blink counts, microsleep, partial closure."""
-
-    def __init__(self, open_ref=None):
-        self.open_ref = open_ref     # the driver's normal eye opening (calibrated); None = estimate it live
-        self.perclos_win = deque()   # (t, dt, closed)
-        self.blinks = deque()        # (t_end, duration) from the last 60 s
-        self.open_win = deque()      # (t, openness) for the "normally open" reference
-        self.closed_since = None
-        self.last_blink_end = None
-        self.partial_since = None
-        self.last_t = None
-        self.t0 = None
-
-    def update(self, t, closed, openness, one_eye=False):
-        if self.t0 is None:
-            self.t0 = t
-        dt = 0.0 if self.last_t is None else min(0.2, t - self.last_t)
-        self.last_t = t
-
-        # PERCLOS: share of the last 60 s with eyes closed
-        self.perclos_win.append((t, dt, closed))
-        while self.perclos_win and t - self.perclos_win[0][0] > PERCLOS_WINDOW:
-            self.perclos_win.popleft()
-        total = sum(d for _, d, _ in self.perclos_win) or 1e-6
-        perclos = sum(d for _, d, c in self.perclos_win if c) / total
-
-        # closure episodes (each one is a blink, or a microsleep if long)
-        blink_ended = False
-        if closed:
-            self.closed_since = self.closed_since if self.closed_since is not None else t
-        elif self.closed_since is not None:
-            self.blinks.append((t, t - self.closed_since))
-            self.closed_since = None
-            self.last_blink_end = t
-            blink_ended = True
-        while self.blinks and t - self.blinks[0][0] > 60.0:
-            self.blinks.popleft()
-        closed_sec = (t - self.closed_since) if self.closed_since is not None else 0.0
-        since_blink = t - (self.last_blink_end if self.last_blink_end is not None else self.t0)
-
-        durs = [d for _, d in self.blinks]
-        blink_rate = len(durs)                       # blinks in the last minute (low during the first minute)
-        elapsed = min(60.0, t - self.t0)
-        blinks_per_min = blink_rate * 60.0 / elapsed if elapsed > 0 else 0.0   # scaled during warm-up
-        avg_blink = float(np.mean(durs)) if durs else 0.0
-        slow_blinks = sum(1 for d in durs if d > SLOW_BLINK_S)
-
-        # microsleep / sleep from the duration of the current closure
-        level = "sleep" if closed_sec >= SLEEP_S else \
-                ("microsleep" if closed_sec >= MICROSLEEP_S else "awake")
-
-        # eye opening as a % of the driver's normal opening; partially closed = <= PARTIAL_RATIO, sustained
-        ratio = None
-        if openness is not None:
-            ref = self.open_ref
-            if not ref:                              # no calibration: estimate the normal opening live
-                self.open_win.append((t, openness))
-                while self.open_win and t - self.open_win[0][0] > OPEN_REF_WINDOW:
-                    self.open_win.popleft()
-                ref = float(np.percentile([o for _, o in self.open_win], OPEN_REF_PCT))
-            ratio = openness / ref if ref > 1e-6 else None
-        partial_now = (ratio is not None and not closed and not one_eye and ratio <= PARTIAL_RATIO)
-        self.partial_since = (self.partial_since or t) if partial_now else None
-        partial = self.partial_since is not None and (t - self.partial_since) >= PARTIAL_MIN_S
-
-        return {
-            "closed_sec": closed_sec,
-            "since_last_blink": since_blink,
-            "blink_ended": blink_ended,
-            "perclos": round(perclos, 3),
-            "perclos_drowsy": perclos >= PERCLOS_DROWSY,
-            "blink_rate": blink_rate,
-            "blinks_per_min": round(blinks_per_min, 1),
-            "warmed_up": (t - self.t0) >= WARMUP_S,
-            "avg_blink_sec": round(avg_blink, 2),
-            "slow_blinks": slow_blinks,
-            "microsleep": level == "microsleep",
-            "sleep": level == "sleep",
-            "drowsiness_level": level,
-            "eye_openness_pct": int(round(min(ratio, 1.5) * 100)) if ratio is not None else None,
-            "eyes_partially_closed": partial,
         }
