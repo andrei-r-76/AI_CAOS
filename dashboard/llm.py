@@ -277,6 +277,7 @@ def decide(state, context, history, now=None):
     if state.get("eyes_closed_sec", 0) >= EMERGENCY_SEC:   # deterministic emergency, LLM can't cancel it
         decision["actions"].update(EMERGENCY)
         decision["level"] = "critical"
+    decision["action"] = decision["actions"] or "action not needed"
     history.add_decision(trigger, decision, now)
     return decision
 
@@ -386,7 +387,7 @@ def live():
         in_emergency = bool(actions)
         if copilot.should_decide(state, context):
             d = copilot.decide(state, context)
-            print(f"[{d['level']}] {d['message']}  actions={d['actions']}  ({d['source']}: {d['reason']})")
+            print(f"[{d['level']}] {d['message']}  action={d['action']}  ({d['source']}: {d['reason']})")
 
 
 if __name__ == "__main__":

@@ -195,7 +195,7 @@ def run_decision(copilot, state, context, busy):
             apply_actions(d["actions"], time.time())
             publish({"type": "assistant", "t": time.time(), "text": d["message"], "lang": "en",
                      "severity": LEVEL_TO_SEVERITY[d["level"]], "trigger": d.get("trigger")})
-            print(f"[{d['level']}] {d['message']}  actions={d['actions']}  ({d['source']}: {d['reason']})")
+            print(f"[{d['level']}] {d['message']}  action={d['action']}  ({d['source']}: {d['reason']})")
     except Exception as e:
         print(f"[server] decision failed: {type(e).__name__}: {e}")
     finally:
