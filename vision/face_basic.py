@@ -672,7 +672,7 @@ def main():
                 **hm,
             })
             for k in ("blink_rate", "avg_blink_sec", "slow_blinks", "perclos", "perclos_drowsy",
-                      "microsleep", "sleep", "drowsiness_level", "squinting"):
+                      "microsleep", "sleep", "squinting"):
                 state[k] = bm[k]
             state.update({
                 "looking_away_sec": gm["away_sec"], "gaze": gm["direction"] or "on_road",
@@ -745,8 +745,7 @@ def main():
             put(frame, f"{lvl.upper()}: {state['alert_reason']}" + (f"  (+ {others})" if others else ""),
                 (12, h - 67), (255, 255, 255), 0.6)
         cv2.rectangle(frame, (0, 0), (w, 50), (25, 25, 25), -1)
-        put(frame, f"Somnolenta {state['drowsiness_score']} ({state['fatigue_level']})  "
-                   f"Atentie {state['attention_score']}", (10, 20), (255, 255, 255), 0.5)
+        
         flags = [k for k in ("hand_near_face", "hand_at_ear", "hand_at_eyes", "phone_detected",
                              "camera_blocked", "low_light") if state[k]]
         put(frame, f"CLAHE {'ON' if _clahe_on else 'OFF'} (lumina {_brightness:.0f})  "
