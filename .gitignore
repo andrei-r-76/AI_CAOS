@@ -20,7 +20,5 @@ recordings/
 .vscode/
 .idea/
 .DS_Store
-
-# state
-
+*_landmarker.task
 state.json
