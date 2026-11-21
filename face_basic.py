@@ -736,9 +736,7 @@ def main():
             put(frame, f"{lvl.upper()}: {state['alert_reason']}" + (f"  (+ {others})" if others else ""),
                 (12, h - 67), (255, 255, 255), 0.6)
         cv2.rectangle(frame, (0, 0), (w, 50), (25, 25, 25), -1)
-        put(frame, f"Somnolenta {state['drowsiness_score']} ({state['fatigue_level']})  "
-                   f"Atentie {state['attention_score']}  PERCLOS {state['perclos'] * 100:.0f}%  "
-                   f"Pasageri {state['passenger_count']}", (10, 20), (255, 255, 255), 0.5)
+
         flags = [k for k in ("hand_near_face", "hand_at_ear", "hand_at_eyes", "phone_detected",
                              "camera_blocked", "low_light") if state[k]]
         put(frame, f"CLAHE {'ON' if USE_CLAHE else 'OFF'}  YOLO {'ON' if detector.available else 'OFF'}  "
