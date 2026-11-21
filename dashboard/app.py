@@ -27,6 +27,7 @@ from llm import EVENTS, Copilot, emergency, make_event, read_state, warm_up
 
 app = Flask(__name__)
 TICK_SEC = 0.2
+USE_SIMULATOR = False
 METRICS_SEC = 1.0
 ACTION_HOLD_SEC = 8            # how long copilot actions stay on in the simulated vehicle
 LEVEL_TO_SEVERITY = {"info": 1, "warning": 2, "critical": 3}
@@ -209,6 +210,10 @@ def loop():
         time.sleep(TICK_SEC)
         now = time.time()
         real = read_state()
+        if real is None and not USE_SIMULATOR:
+            step_vehicle(now, now - last_t)
+            last_t = now
+            continue
         source = "camera" if real else "simulator"
         if source != last_source:
             print(f"[server] driver data from: {source}")
