@@ -153,7 +153,7 @@ ALERT_TEXT = {"microsleep": "Eyes closed too long. Wake up!", "drowsy": "Signs o
               "phone": "Phone in hand while driving.", "eyerub": "Eye rubbing detected.",
               "noface": "Driver not visible."}
 ALERT_SEVERITY = {"yawn": 1, "microsleep": 3, "phone": 3}
-
+ALERT_LEVEL = {"none": 0, "ok": 0, "info": 1, "warning": 2, "critical": 3}
 
 def to_dashboard(s):
     """llm/state.json names -> the names the dashboard reads."""
@@ -177,10 +177,18 @@ def to_dashboard(s):
         if s.get("yawning"):
             flags.append("yawn")
     state = "danger" if {"microsleep", "phone"} & set(flags) else "warn" if flags else "ok"
-    metrics = {"ear": s.get("ear"), "perclos": s.get("perclos"), "blink_rate": s.get("blink_rate"),
-               "blink_ms": s.get("blink_ms"), "eyerub": bool(s.get("eyerub")), "yaw": s.get("yaw"),
-               "pitch": s.get("pitch"), "mar": s.get("mar"), "phone": bool(s.get("hand_near_face")),
-               "face": s.get("face_found", True)}
+    ear = s.get("ear")
+    if ear is None and s.get("eye_openness_pct") is not None:
+        ear = s["eye_openness_pct"] / 100                     # 100 -> 1.00
+    metrics = {"ear": ear, "perclos": s.get("perclos"), "blink_rate": s.get("blink_rate"),
+               "blink_ms": s.get("blink_ms") or (s.get("avg_blink_sec") or 0) * 1000,
+               "eyerub": bool(s.get("eyerub") or s.get("hand_at_eyes")),
+               "yaw": s.get("yaw", s.get("head_yaw")),
+               "pitch": s.get("pitch", s.get("head_pitch")),
+               "mar": s.get("mar"), "yawning": bool(s.get("yawning")),
+               "phone": bool(s.get("hand_near_face") or s.get("phone_use")),
+               "face": s.get("face_found", True),
+               "level": ALERT_LEVEL.get(s.get("alert_level"), 0)}
     return flags, state, metrics
 
 

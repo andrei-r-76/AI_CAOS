@@ -71,7 +71,7 @@ function onMetrics({ metrics: m, flags, state, t, yawns, source, vehicle }) {
 
   // live values
   const noFace = m.face === false;
-  const f = (v, fn) => (noFace || v == null ? "—" : fn(v));
+  const f = (v, fn) => (noFace || v == null ? "-" : fn(v));
   const yn = v => (v ? "Yes" : "No");
   $("m-ear").textContent = f(m.ear, v => v.toFixed(2));
   $("m-perclos").textContent = f(m.perclos, v => Math.round(v * 100) + "%");
@@ -80,7 +80,7 @@ function onMetrics({ metrics: m, flags, state, t, yawns, source, vehicle }) {
   $("m-yaw").textContent = f(m.yaw, v => Math.round(v) + "°");
   $("m-pitch").textContent = f(m.pitch, v => Math.round(v) + "°");
   $("m-face").textContent = noFace ? "No" : "Yes";
-  $("m-mar").textContent = f(m.mar, v => v.toFixed(2));
+  $("m-mar").textContent = noFace ? "-" : (m.mar != null ? m.mar.toFixed(2) : (m.yawning ? "Open" : "Closed"));
   $("m-phone").textContent = f(m.phone, yn);
 
   // session statistics
@@ -97,6 +97,7 @@ function onMetrics({ metrics: m, flags, state, t, yawns, source, vehicle }) {
 function onAlert(a) {
   stats.alerts++; stats.counts[a.kind] = (stats.counts[a.kind] || 0) + 1;
   $("s-alerts").textContent = stats.alerts;
+  if (m.level != null) stats.maxLevel = Math.max(stats.maxLevel, m.level);
   renderCounts();
   pushSuggestion(a.text);
   addLog(a.t, NAMES[a.kind] || a.kind, a.severity, a.text);
@@ -219,7 +220,7 @@ function renderCounts() {
   $("c-mar").textContent = `Yawning: ${n("yawn")}  / ${stats.yawns5} in last 5 min`;
   $("c-phone").textContent = `${n("phone")} `;
   $("c-alerts").textContent = `Highest level: ${stats.maxLevel}`;
-  $("s-ok").textContent = stats.totT ? Math.round(100 * stats.okT / stats.totT) + "%" : "—";
+  $("s-ok").textContent = stats.totT ? Math.round(100 * stats.okT / stats.totT) + "%" : "-";
 }
 renderCounts();
 
@@ -238,7 +239,7 @@ document.querySelectorAll(".tab").forEach(btn => {
 // ---- vehicle summary ----
 // Reads `vehicle` from the "metrics" event:
 //   { speed_kmh, throttle (0..1), brake (0..1), hazard_lights, seat_vibration, wheel_vibration, cruise_control }
-// Missing values show "—".
+// Missing values show "-".
 const pct   = v => Math.round(v * 100) + "%";
 const onOff = v => (v ? "On" : "Off");
 const activeOff = v => (v ? "Active" : "Off");
@@ -254,6 +255,6 @@ const VEHICLE_FIELDS = [
 function renderVehicle(v) {
   VEHICLE_FIELDS.forEach(([id, key, fmt]) => {
     const val = v ? v[key] : null;
-    $(id).textContent = val == null ? "—" : fmt(val);
+    $(id).textContent = val == null ? "-" : fmt(val);
   });
 }

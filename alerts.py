@@ -21,9 +21,6 @@ YAWNS_WARN = 3             # TUNE: this many yawns in 5 minutes = frequent yawni
 MICROSLEEP_WINDOW = 600.0  # microsleeps are counted over 10 minutes
 NODS_WARN = 2              # TUNE: this many head nods per minute = warning
 
-# fatigue_level from drowsiness_score (0-100)
-TIRED_SCORE = 30           # TUNE: score at or above this = "tired"
-DROWSY_SCORE = 60          # TUNE: score at or above this = "drowsy"
 
 LEVELS = ["none", "info", "warning", "critical"]
 
@@ -36,13 +33,13 @@ RULES = [
     ("phone_use",        "warning",  lambda s: s["phone_use"]),
     ("long_glance",      "warning",  lambda s: s["long_glance"]),
     ("fatigue_high",     "warning",  lambda s: s["fatigue_level"] == "drowsy"),
+    ("fatigue_medium",   "info",     lambda s: s["fatigue_level"] == "tired"),
     ("head_nodding",     "warning",  lambda s: s["head_nods_1min"] >= NODS_WARN),
     ("perclos",          "warning",  lambda s: s["perclos_drowsy"]),
     ("hypnosis",         "warning",  lambda s: s["hypnosis"]),
     ("frequent_yawning", "warning",  lambda s: s["yawn_count_5min"] >= YAWNS_WARN),
     ("mirror_too_long",  "warning",  lambda s: s["mirror_too_long"]),
     ("camera_blocked",   "warning",  lambda s: s["camera_blocked"]),
-    ("fatigue_medium",   "info",     lambda s: s["fatigue_level"] == "tired"),
     ("yawning",          "info",     lambda s: s["yawning"]),
     ("rubbing_eyes",     "info",     lambda s: s["hand_at_eyes"]),
     ("drinking",         "info",     lambda s: s["drinking"]),
@@ -69,32 +66,6 @@ class RisingCounter:
         return len(self.times)
 
 
-def drowsiness_score(s):
-    """0-100: combines the fatigue signals. Each term is capped so no single signal dominates."""
-    if s["sleep"] or s["microsleep"]:
-        return 100
-    score = min(40.0, s["perclos"] / 0.15 * 40.0)            # PERCLOS: 15% -> 40 points
-    score += min(20, s["slow_blinks"] * 5)                     # slow/heavy blinks
-    score += min(30, s["yawn_count_5min"] * 10)                # yawns in 5 min
-    score += min(40, s["microsleep_count_10min"] * 20)         # microsleeps in 10 min
-    score += min(30, s["head_nods_1min"] * 15)                 # head nods
-    score += 10 if s["hypnosis"] else 0
-    score += 10 if s["hand_at_eyes"] else 0                    # rubbing the eyes
-    score += 10 if s["eyes_partially_closed"] else 0          # heavy eyelids
-    return int(min(100, round(score)))
-
-
-def attention_score(s):
-    """0-100: share of time on the road, minus penalties for the current distractions."""
-    if not s["face_found"]:
-        return 0
-    score = 100.0 * s["on_road_ratio"]
-    score -= 30 if s["long_glance"] else 0
-    score -= 25 if s["phone_use"] else 0
-    score += 5 if s["mirror_checks"] > 0 else 0                # checking mirrors is good driving
-    return int(max(0, min(100, round(score))))
-
-
 class AlertEngine:
     def __init__(self):
         self.yawns = RisingCounter(YAWNS_WINDOW)
@@ -109,10 +80,6 @@ class AlertEngine:
         s["phone_use"] = bool(s["phone_in_hand"] or s["phone_near_face"] or s["hand_at_ear"])
         s["yawn_count_5min"] = self.yawns.update(t, s["yawning"])
         s["microsleep_count_10min"] = self.micro.update(t, s["microsleep"] or s["sleep"])
-        s["drowsiness_score"] = drowsiness_score(s)
-        s["fatigue_level"] = ("drowsy" if s["drowsiness_score"] >= DROWSY_SCORE else
-                              "tired" if s["drowsiness_score"] >= TIRED_SCORE else "ok")
-        s["attention_score"] = attention_score(s)
 
         for code, _, cond in RULES:
             if cond(s):

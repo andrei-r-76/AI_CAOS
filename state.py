@@ -25,9 +25,7 @@ def new_state():
         "alert_reason": "",           # most important active alert code (see alerts.RULES), "" if none
         "active_alerts": [],          # all active alert codes, most important first
         "events": [],                 # last alerts that started: {ts, time, type, level}
-        "drowsiness_score": 0,        # 0-100 combined fatigue
         "fatigue_level": "ok",        # ok | tired | drowsy
-        "attention_score": 100,       # 0-100 combined attention to the road
 
         # --- people ---
         "face_found": False,          # the driver's face is visible
