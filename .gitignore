@@ -20,5 +20,10 @@ recordings/
 .vscode/
 .idea/
 .DS_Store
+
+# Face recognition / calibration
+
+state.json
+calib.json
 *_landmarker.task
 state.json
