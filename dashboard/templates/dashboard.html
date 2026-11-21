@@ -46,8 +46,11 @@
 
     <!-- Driver summary: live values (big) and session counts (small), as tiles -->
     <div class="panel summary-panel">
-      <div class="panel-header"><h2>Driver summary</h2></div>
-      <div class="tile-grid">
+      <div class="panel-header tabs" role="tablist">
+        <button class="tab on" id="tab-btn-driver" role="tab" aria-selected="true" aria-controls="tab-driver" data-tab="driver">Driver summary</button>
+        <button class="tab" id="tab-btn-vehicle" role="tab" aria-selected="false" aria-controls="tab-vehicle" data-tab="vehicle">Vehicle summary</button>
+      </div>
+      <div class="tile-grid" id="tab-driver" role="tabpanel" aria-labelledby="tab-btn-driver">
         <div class="tile">
           <span class="tile-label">Eye openness</span>
           <div class="tile-val" id="m-ear">—</div>
@@ -107,6 +110,36 @@
           <span class="tile-label">Session time</span>
           <div class="tile-val" id="s-time">00:00</div>
 
+        </div>
+      </div>
+      <div class="tile-grid" id="tab-vehicle" role="tabpanel" aria-labelledby="tab-btn-vehicle" hidden>
+        <div class="tile">
+          <span class="tile-label">Speed</span>
+          <div class="tile-val" id="v-speed">—</div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Throttle</span>
+          <div class="tile-val" id="v-throttle">—</div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Brake</span>
+          <div class="tile-val" id="v-brake">—</div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Hazard lights</span>
+          <div class="tile-val" id="v-hazard">—</div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Seat vibration</span>
+          <div class="tile-val" id="v-seat">—</div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Wheel vibration</span>
+          <div class="tile-val" id="v-wheel">—</div>
+        </div>
+        <div class="tile tile-wide">
+          <span class="tile-label">Cruise control</span>
+          <div class="tile-val" id="v-cruise">—</div>
         </div>
       </div>
     </div>

@@ -466,10 +466,9 @@ td:nth-child(2) {
 .summary-panel { display: flex; flex-direction: column; }
 .tile-grid { flex: 1; grid-auto-rows: 1fr; }
 
+/* more space between a tile's label and its value */
 .tile { gap: 0; }
 .tile-val { margin-top: 14px; }
-
-
 
 /* driver messages sit on the right side of the dialogue box */
 .chat-row.me {
@@ -478,3 +477,27 @@ td:nth-child(2) {
 }
 .chat-row.me .chat-meta { order: 2; }
 .chat-row.me .chat-text { order: 1; }
+
+/* --- SUMMARY TABS (Driver / Vehicle) --- */
+.tile-grid[hidden] { display: none; }
+.panel-header.tabs {
+  display: flex;
+  gap: 28px;
+  padding-bottom: 0;
+}
+.tab {
+  background: none;
+  color: var(--text);
+  border-radius: 0;
+  padding: 0 0 10px;
+  margin-bottom: -1px;               /* underline sits on the header's bottom border */
+  border-bottom: 3px solid transparent;
+  font-size: 1.3rem;
+  font-weight: 700;
+  opacity: 0.5;
+}
+.tab:hover { background: none; opacity: 0.85; }
+.tab.on { opacity: 1; border-bottom-color: var(--primary); }
+
+/* last vehicle tile (cruise control) spans the full row */
+.tile-wide { grid-column: 1 / -1; }

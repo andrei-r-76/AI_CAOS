@@ -47,7 +47,9 @@ src.onmessage = e => {
   else if (ev.type === "action") onAction(ev);
 };
 
-function onMetrics({ metrics: m, flags, state, t, yawns, source }) {
+function onMetrics({ metrics: m, flags, state, t, yawns, source, vehicle }) {
+  latest.driver = m; latest.state = state; latest.flags = flags;
+  renderVehicle(vehicle);
   $("hero").className = "panel status-panel state-" + state;
   $("hero-state").textContent = STATE[state].label;
   $("hero-sub").textContent = flags.length ? flags.map(f => NAMES[f]).join(", ") : STATE[state].sub;
@@ -208,7 +210,7 @@ async function listen(initialDelayMs = 0) {
         const r = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: text })
+          body: JSON.stringify({ message: text, context: { driver: latest.driver, vehicle: latest.vehicle, state: latest.state, flags: latest.flags } })
         });
         const reply = (await r.json()).reply;
         addMsg("car", reply);
@@ -284,7 +286,44 @@ function renderCounts() {
   $("c-face").textContent = `Face not visible: ${n("noface")} `;
   $("c-mar").textContent = `Yawning: ${n("yawn")}  / ${stats.yawns5} in last 5 min`;
   $("c-phone").textContent = `${n("phone")} `;
-  $("c-alerts").textContent = `Highest level ${stats.maxLevel}`;
+  $("c-alerts").textContent = `Highest level: ${stats.maxLevel}`;
   $("s-ok").textContent = stats.totT ? Math.round(100 * stats.okT / stats.totT) + "%" : "—";
 }
 renderCounts();
+
+// ---- summary tabs (Driver / Vehicle) ----
+document.querySelectorAll(".tab").forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll(".tab").forEach(b => {
+      const on = b === btn;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-selected", on);
+      $("tab-" + b.dataset.tab).hidden = !on;
+    });
+  };
+});
+
+// ---- vehicle summary ----
+// Reads `vehicle` from the "metrics" event:
+//   { speed_kmh, throttle (0..1), brake (0..1), hazard_lights, seat_vibration, wheel_vibration, cruise_control }
+// Missing values show "—".
+const latest = { driver: null, vehicle: null, state: null, flags: [] };
+const pct   = v => Math.round(v * 100) + "%";
+const onOff = v => (v ? "On" : "Off");
+const activeOff = v => (v ? "Active" : "Off");
+const VEHICLE_FIELDS = [
+  ["v-speed",    "speed_kmh",       v => Math.round(v) + " km/h"],
+  ["v-throttle", "throttle",        pct],
+  ["v-brake",    "brake",           pct],
+  ["v-hazard",   "hazard_lights",   onOff],
+  ["v-seat",     "seat_vibration",  activeOff],
+  ["v-wheel",    "wheel_vibration", activeOff],
+  ["v-cruise",   "cruise_control",  onOff],
+];
+function renderVehicle(v) {
+  latest.vehicle = v || null;
+  VEHICLE_FIELDS.forEach(([id, key, fmt]) => {
+    const val = v ? v[key] : null;
+    $(id).textContent = val == null ? "—" : fmt(val);
+  });
+}
