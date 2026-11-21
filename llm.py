@@ -13,19 +13,27 @@ Safety: the LLM only PROPOSES. Guardrails decide what is executed:
   - eyes closed >= 3 s triggers the emergency actions without waiting for the LLM:
     the main loop must call emergency(state) on EVERY tick (decide() can take seconds)
 
+Outside events come from scenarios.EVENTS (teammate): make_event(name) turns one into a context event.
+Old API kept for scenario_demo.py: get_alert(state, event) -> just the message text.
+
 Test:  uv run python llm.py                  (fake situations, needs Ollama + LLM_MODEL from .env)
 Live:  uv run python face_basic.py           (terminal 1, writes state.json)
-       uv run python llm.py --live           (terminal 2, prints decisions)
+       uv run python llm.py --live           (terminal 2: random events every 20-45 s, or type one,
+                                              e.g. "pedestrian", recognized by scenario_demo.py)
 """
 import json
 import os
+import random
 import re
 import sys
+import threading
 import time
 from collections import Counter, deque
 
 import ollama
 from dotenv import load_dotenv
+
+from scenarios import EVENTS
 
 load_dotenv()
 MODEL = os.getenv("LLM_MODEL", "llama3.2:1b")
@@ -38,6 +46,10 @@ MAX_BRAKE = 0.3         # the system never brakes harder than this (0..1)
 STATE_FILE = "state.json"
 
 LEVELS = ["info", "warning", "critical"]
+# scenarios.EVENTS has no severity yet: default per event type (unknown events -> warning)
+EVENT_SEVERITY = {"pedestrian": "critical", "car_braking": "critical", "animal": "critical", "cyclist": "warning"}
+EVENT_SEC = 6               # live test: how long an outside event stays active
+RANDOM_EVENT_SEC = (20, 45)  # live test: a random event every 20-45 s
 # driver problem -> fixed fallback message, words a good message must contain
 FALLBACK = {
     "drowsy": "Wake up! Open your eyes and focus on the road.",
@@ -159,6 +171,13 @@ def event_info(event):
     return text, level, keywords, event.get("fallback") or f"Careful: {text}."
 
 
+def make_event(name, now=None):
+    """scenarios.EVENTS[name] -> a context event (adds type, severity and an expiry time)."""
+    now = now or time.time()
+    return {**EVENTS[name], "type": name, "until": now + EVENT_SEC,
+            "severity": EVENTS[name].get("severity") or EVENT_SEVERITY.get(name, "warning")}
+
+
 def clean(text):
     text = str(text).strip().strip("\"'")
     return re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0].strip()
@@ -212,9 +231,10 @@ def decide(state, context, history, now=None):
 
     # the code decides the minimum level and the fallback; an outside danger comes first
     levels = [found[2]] if found else []
-    if events:
-        text, ev_level, keywords, fallback = event_info(events[0])
-        trigger = events[0].get("type", text) if isinstance(events[0], dict) else text
+    if events:     # focus on the most dangerous event; if equal, the newest one
+        main = max(enumerate(events), key=lambda ie: (LEVELS.index(event_info(ie[1])[1]), ie[0]))[1]
+        text, ev_level, keywords, fallback = event_info(main)
+        trigger = main.get("type", text) if isinstance(main, dict) else text
         levels.append(ev_level)
     else:
         trigger, keywords, fallback = found[0], RELEVANT[found[0]], FALLBACK[found[0]]
@@ -288,6 +308,13 @@ class Copilot:
         return decide(state, context, self.history, now)
 
 
+def get_alert(state, event=None):
+    """Old one-sentence API, still used by scenario_demo.py --alert: returns only the message (or None)."""
+    context = {"events": [make_event(event)]} if event else {}
+    d = decide(state or {}, context, History())
+    return d["message"] if d else None
+
+
 def emergency(state):
     """Call on every tick, BEFORE/independent of decide(): returns the emergency actions or None.
     Deterministic and instant: an emergency must never wait for the LLM."""
@@ -308,20 +335,46 @@ def read_state(path=STATE_FILE):
 
 
 def live():
+    """Test loop: real driver (state.json) + outside events, random or typed. Ctrl+C to stop."""
+    from scenario_demo import detect_scenario       # teammate's text -> event recognizer
+
     warm_up()
-    print(f"live mode, model: {MODEL}. Start face_basic.py in another terminal. Ctrl+C to stop.")
     copilot = Copilot()
-    context = {"vehicle": {"speed_kmh": 100}}              # until scenarios.py provides the real context
-    in_emergency = False
+    context = {"vehicle": {"speed_kmh": 100}, "events": []}
+    typed = []                                        # events typed in the terminal
+
+    def read_input():
+        for line in sys.stdin:
+            name = detect_scenario(line.strip())
+            if name:
+                typed.append(name)
+            elif line.strip():
+                print(f"unknown scenario, try one of: {', '.join(EVENTS)}")
+
+    threading.Thread(target=read_input, daemon=True).start()
+    print(f"live mode, model: {MODEL}. Start face_basic.py in another terminal.\n"
+          f"Random events every {RANDOM_EVENT_SEC[0]}-{RANDOM_EVENT_SEC[1]} s, or type one: {', '.join(EVENTS)}")
+    next_random, in_emergency = time.time() + random.uniform(*RANDOM_EVENT_SEC), False
     while True:
         time.sleep(0.2)
-        state = read_state()
+        now = time.time()
+        context["events"] = [e for e in context["events"] if e["until"] > now]   # expire old events
+        if now >= next_random:
+            typed.append(random.choice(list(EVENTS)))
+            next_random = now + random.uniform(*RANDOM_EVENT_SEC)
+        while typed:
+            name = typed.pop(0)
+            print(f"[event] {name}")
+            context["events"].append(make_event(name, now))
+
+        state = read_state() or {}                    # no vision running -> only events are judged
         actions = emergency(state)
         if actions and not in_emergency:
             print(f"[EMERGENCY] {FALLBACK['drowsy']} {actions}")
         in_emergency = bool(actions)
-        if state and copilot.should_decide(state, context):
-            print(copilot.decide(state, context))
+        if copilot.should_decide(state, context):
+            d = copilot.decide(state, context)
+            print(f"[{d['level']}] {d['message']}  actions={d['actions']}  ({d['source']}: {d['reason']})")
 
 
 if __name__ == "__main__":
