@@ -1,41 +1,34 @@
-"""Phone / bottle / cup detection with YOLO (ultralytics), on a background thread.
+"""Phone detection with YOLO (ultralytics), on a background thread.
 
-Optional: if `ultralytics` is not installed, everything else keeps working (object_detection = False).
-    Install:  uv pip install ultralytics      (the model file downloads automatically the first time)
-
-YOLO runs on its own thread every OBJ_EVERY_S on the newest frame, so the face/eye detection FPS
-stays high. Detections are then related to the driver's face and hands:
+Optional: without `ultralytics` everything else still works.   Install: uv pip install ultralytics
+YOLO runs every OBJ_EVERY_S on the newest frame, so the face FPS stays high. Results vs the driver:
   - phone_detected:  a phone is visible
   - phone_in_hand:   a phone box touches a hand
-  - phone_near_face: a phone box touches the (expanded) face box -> call / looking at the phone
-  - drinking:        a bottle or cup at the mouth
+  - phone_near_face: a phone box touches the (grown) face box -> call / looking at the phone
 """
 import os
 import threading
 import time
 
-from hand_face import FACE_MARGIN   # one definition of "near the face" for hands AND objects
+from hand_face import grow_box      # same "near the face" for hands and objects
 
 try:
     from ultralytics import YOLO
 except Exception:              # not installed, or torch missing
     YOLO = None
 
-OBJ_MODEL = "yolo26n.pt"   # TUNE: YOLO26 nano (fast on CPU). "yolo26s.pt" = more accurate, slower.
-                           #       Looked for next to this file, then in the folder you run from;
-                           #       if not found, ultralytics downloads it (needs internet once)
-OBJ_CLASSES = {67: "phone", 39: "bottle", 41: "cup"}   # COCO class ids
-OBJ_CONF = 0.35            # TUNE: minimum confidence for a detection
-OBJ_IMGSZ = 416            # TUNE: YOLO input size (320 = faster, 416 = phones found better, 640 = small/far phones)
-OBJ_EVERY_S = 0.5          # TUNE: run YOLO at most this often (seconds). Lower = faster reaction, fewer FPS
-OBJ_THREADS = 1            # TUNE: CPU threads for YOLO. By default torch takes ALL cores and the face
-                           #       detection FPS drops; 1-2 keeps MediaPipe fast
-OBJ_KEEP_S = 1.0           # TUNE: a detection stays valid this long (YOLO runs less often than the camera)
-MOUTH_MARGIN = 0.15        # cup/bottle box expanded by this fraction (of the face width) for "at the mouth"
+OBJ_MODEL = "yolo26n.pt"   # TUNE: YOLO26 nano (fast on CPU); "yolo26s.pt" = more accurate, slower.
+                           #       Looked for next to this file, then in the run folder, else downloaded once.
+OBJ_CLASSES = {67: "phone"}   # COCO class id
+OBJ_CONF = 0.35            # TUNE: minimum confidence
+OBJ_IMGSZ = 416            # TUNE: input size (320 faster, 416 finds phones better, 640 small / far phones)
+OBJ_EVERY_S = 0.5          # TUNE: run at most this often (lower = faster reaction, fewer FPS)
+OBJ_THREADS = 1            # TUNE: CPU threads for YOLO (torch takes all cores by default -> MediaPipe slows)
+OBJ_KEEP_S = 1.0           # TUNE: a detection stays valid this long
 
 
 def _model_path(name):
-    """The model file next to this module, else in the current folder, else just the name (auto-download)."""
+    """The model next to this file, else in the run folder, else just the name (auto-download)."""
     for folder in (os.path.dirname(os.path.abspath(__file__)), os.getcwd()):
         path = os.path.join(folder, name)
         if os.path.exists(path):
@@ -46,7 +39,7 @@ def _model_path(name):
 class ObjectDetector:
     def __init__(self, enabled=True):
         self.available = enabled and YOLO is not None
-        self.status = "dezactivat" if not enabled else ("ultralytics lipseste" if YOLO is None else "se incarca")
+        self.status = "off" if not enabled else ("ultralytics not installed" if YOLO is None else "loading")
         self.lock = threading.Lock()
         self.frame = None
         self.dets, self.dets_t = [], 0.0
@@ -55,7 +48,7 @@ class ObjectDetector:
             threading.Thread(target=self._loop, daemon=True).start()
 
     def submit(self, frame):
-        """Give the newest camera frame (call BEFORE drawing on it). Cheap: copies only when YOLO is idle."""
+        """Give the newest frame (BEFORE drawing on it). Copies only when YOLO is idle."""
         if self.available:
             with self.lock:
                 if self.frame is None:
@@ -64,18 +57,18 @@ class ObjectDetector:
     def _loop(self):
         try:
             import torch
-            torch.set_num_threads(OBJ_THREADS)    # leave the other cores to MediaPipe
+            torch.set_num_threads(OBJ_THREADS)
         except Exception:
             pass
         try:
             path = _model_path(OBJ_MODEL)
             model = YOLO(path)
-            self.status = "activ"
-            print(f"YOLO activ ({path})")
+            self.status = "on"
+            print(f"YOLO on ({path})")
         except Exception as e:                      # e.g. no internet for the first download
-            self.status = f"eroare: {e}"
+            self.status = f"error: {e}"
             self.available = False
-            print(f"YOLO nu porneste: {e}")
+            print(f"YOLO cannot start: {e}")
             return
         while self.running:
             with self.lock:
@@ -85,20 +78,20 @@ class ObjectDetector:
                 continue
             t0 = time.time()
             try:
-                res = model.predict(frame, imgsz=OBJ_IMGSZ, conf=OBJ_CONF,
-                                    classes=list(OBJ_CLASSES), verbose=False)[0]
+                res = model.predict(frame, imgsz=OBJ_IMGSZ, conf=OBJ_CONF, classes=list(OBJ_CLASSES),
+                                    verbose=False)[0]
                 dets = [(OBJ_CLASSES[int(c)], float(p), *map(float, box))
                         for c, p, box in zip(res.boxes.cls.tolist(), res.boxes.conf.tolist(),
                                              res.boxes.xyxy.tolist())]
             except Exception as e:
-                self.status = f"eroare: {e}"
+                self.status = f"error: {e}"
                 dets = []
             with self.lock:
                 self.dets, self.dets_t = dets, time.time()
             time.sleep(max(0.0, OBJ_EVERY_S - (time.time() - t0)))
 
     def latest(self, now):
-        """[(label, conf, x1, y1, x2, y2), ...] in frame pixels; [] if stale."""
+        """[(label, conf, x1, y1, x2, y2), ...] in pixels; [] if too old."""
         with self.lock:
             return list(self.dets) if now - self.dets_t <= OBJ_KEEP_S else []
 
@@ -110,29 +103,15 @@ def _overlap(a, b):
     return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
 
 
-def relate(dets, face_xy, hands_px, face_box):
-    """Relate detections to the driver's face (478 points or None), its box (x0, y0, x1, y1, computed once
-    per frame in face_basic.py; None = no face) and hands (lists of (x, y))."""
-    out = {"phone_detected": False, "phone_in_hand": False, "phone_near_face": False,
-           "drinking": False, "objects": sorted({d[0] for d in dets})}
-    mouth = None
-    fw = 0.0
-    if face_xy is not None and face_box is not None:
-        x0, y0, x1, y1 = face_box
-        fw, fh = x1 - x0, y1 - y0
-        face_box = (x0 - fw * FACE_MARGIN, y0 - fh * FACE_MARGIN, x1 + fw * FACE_MARGIN, y1 + fh * FACE_MARGIN)
-        mouth = face_xy[13]
-    for label, _, x1, y1, x2, y2 in dets:
-        box = (x1, y1, x2, y2)
-        if label == "phone":
-            out["phone_detected"] = True
-            if face_box and _overlap(box, face_box):
-                out["phone_near_face"] = True
-            for hand in hands_px or []:
-                if any(x1 <= x <= x2 and y1 <= y <= y2 for x, y in hand):
-                    out["phone_in_hand"] = True
-        elif mouth is not None:                    # bottle / cup at the mouth
-            m = fw * MOUTH_MARGIN
-            if x1 - m <= mouth[0] <= x2 + m and y1 - m <= mouth[1] <= y2 + m:
-                out["drinking"] = True
+def relate(dets, hands_px, face_box):
+    """Phones vs the driver's face box (or None) and hands (lists of (x, y))."""
+    out = {"phone_detected": False, "phone_in_hand": False, "phone_near_face": False}
+    near_face = grow_box(face_box) if face_box is not None else None
+    for _, _, x1, y1, x2, y2 in dets:
+        out["phone_detected"] = True
+        if near_face and _overlap((x1, y1, x2, y2), near_face):
+            out["phone_near_face"] = True
+        for hand in hands_px or []:
+            if any(x1 <= x <= x2 and y1 <= y <= y2 for x, y in hand):
+                out["phone_in_hand"] = True
     return out
