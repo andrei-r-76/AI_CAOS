@@ -36,8 +36,8 @@ from dotenv import load_dotenv
 from scenarios import EVENTS
 
 load_dotenv()
-MODEL = os.getenv("LLM_MODEL", "llama3.2:1b")
-TIMEOUT_SEC = float(os.getenv("LLM_TIMEOUT_SEC", "8"))   # JSON answers are longer than one sentence
+MODEL = os.getenv("LLM_MODEL")
+TIMEOUT_SEC = float(os.getenv("LLM_TIMEOUT_SEC"))   # JSON answers are longer than one sentence
 HOLD_SEC = 1.0          # a driver problem must last this long before we react
 COOLDOWN_SEC = 8.0      # min seconds before reacting again to the same thing
 HISTORY_SEC = 600       # history window: last 10 minutes
@@ -219,6 +219,8 @@ def warm_up():
     """Load the model at startup (own long timeout: loading can take much longer than one answer)."""
     try:
         ollama.Client(timeout=120).generate(model=MODEL, prompt="hi", options={"num_predict": 1}, keep_alive="30m")
+        print(f"[llm] warm-up done, model {MODEL} is ready")
+        print(f"[llm] timeout is {TIMEOUT_SEC}s, max brake is {MAX_BRAKE}, history window is {HISTORY_SEC}s")
     except Exception as e:
         print(f"[llm] warm-up failed ({type(e).__name__}): decisions will use fixed messages")
 
