@@ -10,6 +10,7 @@ stays high. Detections are then related to the driver's face and hands:
   - phone_near_face: a phone box touches the (expanded) face box -> call / looking at the phone
   - drinking:        a bottle or cup at the mouth
 """
+import os
 import threading
 import time
 
@@ -20,15 +21,26 @@ try:
 except Exception:              # not installed, or torch missing
     YOLO = None
 
-OBJ_MODEL = "yolo26n.pt"   # TUNE: YOLO26 nano (fast on CPU). "yolo26s.pt" = more accurate, slower
+OBJ_MODEL = "yolo26n.pt"   # TUNE: YOLO26 nano (fast on CPU). "yolo26s.pt" = more accurate, slower.
+                           #       Looked for next to this file, then in the folder you run from;
+                           #       if not found, ultralytics downloads it (needs internet once)
 OBJ_CLASSES = {67: "phone", 39: "bottle", 41: "cup"}   # COCO class ids
 OBJ_CONF = 0.35            # TUNE: minimum confidence for a detection
-OBJ_IMGSZ = 320            # TUNE: YOLO input size (320 = faster, 416/640 = better for small or far phones)
+OBJ_IMGSZ = 416            # TUNE: YOLO input size (320 = faster, 416 = phones found better, 640 = small/far phones)
 OBJ_EVERY_S = 0.5          # TUNE: run YOLO at most this often (seconds). Lower = faster reaction, fewer FPS
 OBJ_THREADS = 1            # TUNE: CPU threads for YOLO. By default torch takes ALL cores and the face
                            #       detection FPS drops; 1-2 keeps MediaPipe fast
 OBJ_KEEP_S = 1.0           # TUNE: a detection stays valid this long (YOLO runs less often than the camera)
 MOUTH_MARGIN = 0.15        # cup/bottle box expanded by this fraction (of the face width) for "at the mouth"
+
+
+def _model_path(name):
+    """The model file next to this module, else in the current folder, else just the name (auto-download)."""
+    for folder in (os.path.dirname(os.path.abspath(__file__)), os.getcwd()):
+        path = os.path.join(folder, name)
+        if os.path.exists(path):
+            return path
+    return name
 
 
 class ObjectDetector:
@@ -56,11 +68,14 @@ class ObjectDetector:
         except Exception:
             pass
         try:
-            model = YOLO(OBJ_MODEL)
+            path = _model_path(OBJ_MODEL)
+            model = YOLO(path)
             self.status = "activ"
+            print(f"YOLO activ ({path})")
         except Exception as e:                      # e.g. no internet for the first download
             self.status = f"eroare: {e}"
             self.available = False
+            print(f"YOLO nu porneste: {e}")
             return
         while self.running:
             with self.lock:

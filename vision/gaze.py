@@ -250,5 +250,4 @@ class BlinkTracker:
             "slow_blinks": slow_blinks,
             "microsleep": level == "microsleep",
             "sleep": level == "sleep",
-            "drowsiness_level": level,
         }

@@ -25,6 +25,7 @@ import math
 import os
 import time
 import urllib.request
+from collections import deque
 
 import cv2
 import mediapipe as mp
@@ -58,6 +59,18 @@ MOUTH_TOP_BOTTOM = (13, 14)
 # --- MOUTH / YAWN (jawOpen blendshape) ---
 YAWN_MIN_S = 1.2           # TUNE: mouth must stay wide open this long to count as a yawn (not speech)
 YAWN_RELEASE = 0.7         # TUNE: hysteresis - once a yawn starts, it ends only when jaw < JAW_OPEN * this
+# mouth open / talking from the LIP points (works with the head turned left/right, unlike jawOpen)
+MOUTH_GAPS = ((13, 14), (82, 87), (312, 317))   # inner lips: center, left side, right side (upper, lower)
+FACE_HEIGHT = (10, 152)    # forehead top, chin: the gap is measured as a fraction of the face height
+MOUTH_OPEN_GAP = 0.03      # TUNE: lip gap above this (of the face height) = mouth open; closes below 70% of it
+TALK_WINDOW_S = 1.0        # TUNE: look at the lip gap over the last N seconds...
+TALK_BAND = 0.006          # TUNE: changes smaller than +-this are jitter, not movement (a still, half-open
+                           #       mouth jitters ~+-0.004). Raise it if "talking" shows while silent.
+TALK_SMOOTH = 3            # TUNE: average the lip gap over this many frames first (removes landmark jitter)
+TALK_SWINGS = 2            # TUNE: talking = the gap turns up/down at least this many times in TALK_WINDOW_S
+                           #       (opening once = 0 turns, yawn = 1 turn, speech = ~4-8 turns per second)
+MOUTH_DELAY_S = 0.5        # TUNE: when the mouth starts moving from closed, wait this long before showing
+                           #       "mouth open" / "talking" (a yawn that is just starting is not talk)
 
 # --- CALIBRATION ---
 # gaze zones learned at calibration. TUNE: add/remove zones here (names in gaze.MIRROR_ZONES count as
@@ -232,6 +245,31 @@ def eye_cheek_ratio(frame, xy, face_box):
         return None
     cheek = (cheeks[0] + cheeks[1]) / 2
     return (eyes[0] + eyes[1]) / 2 / cheek if cheek > 5 else None
+
+
+def count_swings(vals, band):
+    """How many times the values turn from going up to going down (or back), ignoring moves under +-band.
+    The values are first averaged over TALK_SMOOTH frames, so frame-to-frame landmark jitter is not counted."""
+    if not vals:
+        return 0
+    vals = [sum(vals[max(0, i - TALK_SMOOTH + 1):i + 1]) / len(vals[max(0, i - TALK_SMOOTH + 1):i + 1])
+            for i in range(len(vals))]
+    swings, direction, ext = 0, 0, vals[0]     # direction: 0 = not moving yet, 1 = going up, -1 = going down
+    for v in vals[1:]:
+        if direction == 0:
+            if abs(v - ext) > band:
+                direction, ext = (1 if v > ext else -1), v
+        elif direction > 0:
+            if v > ext:
+                ext = v
+            elif ext - v > band:               # was going up, now came down more than band
+                swings, direction, ext = swings + 1, -1, v
+        else:
+            if v < ext:
+                ext = v
+            elif v - ext > band:               # was going down, now went up more than band
+                swings, direction, ext = swings + 1, 1, v
+    return swings
 
 
 def blendshapes(face_res, idx):
@@ -583,6 +621,10 @@ def main():
     last_face_seen = t_start      # for face_lost_sec
     closed_frames = 0             # debounce of "both eyes below the threshold" (driver only)
     yawn_since = None
+    mouth_open = False            # lip gap above MOUTH_OPEN_GAP (with hysteresis)
+    gap_hist = deque()            # (t, lip gap) over the last TALK_WINDOW_S seconds (talking)
+    mouth_delay = Held(MOUTH_DELAY_S)   # delay from "mouth closed" to any open / talking state
+    last_wide = -1e9              # last time the mouth was wide open (yawn): no "talking" right after it
     prof = {}
 
     def tick(name, start):
@@ -700,6 +742,25 @@ def main():
             yawn_since = (yawn_since or now) if wide else None
             yawning = wide and now - yawn_since >= YAWN_MIN_S
 
+            # mouth open / talking from the lips: the widest of 3 inner-lip gaps (one side stays visible
+            # when the head is turned), / face height. Talking = the gap keeps moving up and down.
+            face_h = math.hypot(xy[FACE_HEIGHT[0]][0] - xy[FACE_HEIGHT[1]][0],
+                                xy[FACE_HEIGHT[0]][1] - xy[FACE_HEIGHT[1]][1]) or 1.0
+            gap = max(math.hypot(xy[a][0] - xy[b][0], xy[a][1] - xy[b][1]) for a, b in MOUTH_GAPS) / face_h
+            mouth_open = gap > (MOUTH_OPEN_GAP * 0.7 if mouth_open else MOUTH_OPEN_GAP)
+            gap_hist.append((now, gap))
+            while gap_hist and now - gap_hist[0][0] > TALK_WINDOW_S:
+                gap_hist.popleft()
+            swings = count_swings([v for _, v in gap_hist], TALK_BAND)
+            lips_moving = swings >= TALK_SWINGS
+            if wide:
+                last_wide = now
+            # delay: from closed, the mouth must be open / moving for MOUTH_DELAY_S before it is shown
+            mouth_started = mouth_delay.update(now, mouth_open or swings >= 1)
+            mouth_shown = mouth_open and mouth_started            # what we report / draw
+            # talking = lips moving; not while yawning or right after (the yawn's closing also moves the lips)
+            talking = mouth_started and lips_moving and not wide and now - last_wide > 2 * TALK_WINDOW_S
+
             # trackers
             bm = blink_tracker.update(now, closed=closed, openness=openness)
             gm = gaze_tracker.update(now, zone)
@@ -710,11 +771,13 @@ def main():
                 "eyes_open_sec": bm["eyes_open_sec"],
                 "since_last_blink_sec": round(bm["since_last_blink"], 1),
                 "yawning": yawning,
+                "mouth_open": mouth_shown,
+                "talking": talking,
                 "head_yaw": round(yaw_d, 1), "head_pitch": round(pitch_d, 1), "head_roll": round(roll_d, 1),
                 **hm,
             })
             for k in ("blink_rate", "avg_blink_sec", "slow_blinks",
-                      "microsleep", "sleep", "drowsiness_level"):
+                      "microsleep", "sleep"):
                 state[k] = bm[k]
             state.update({
                 "looking_away_sec": gm["away_sec"], "gaze": gm["direction"] or "on_road",
@@ -729,7 +792,8 @@ def main():
                 cv2.polylines(frame, [poly], True, eye_col, 1)
             for i in IRIS_POINTS:
                 cv2.circle(frame, (int(xy[i][0]), int(xy[i][1])), 1, (255, 255, 0), -1)
-            mouth_col = (0, 0, 255) if yawning else ((0, 165, 255) if wide else (0, 255, 0))
+            mouth_col = ((0, 0, 255) if yawning else (0, 165, 255) if wide else
+                         (255, 255, 0) if (talking or mouth_shown) else (0, 255, 0))
             mt, mb = (tuple(int(v) for v in xy[MOUTH_TOP_BOTTOM[0]]), tuple(int(v) for v in xy[MOUTH_TOP_BOTTOM[1]]))
             ml, mr = (tuple(int(v) for v in xy[MOUTH_CORNERS[0]]), tuple(int(v) for v in xy[MOUTH_CORNERS[1]]))
             cv2.line(frame, mt, mb, mouth_col, 2)
@@ -744,8 +808,10 @@ def main():
             put(frame, f"Sofer  cap yaw {yaw_d:+.0f} pitch {pitch_d:+.0f} roll {roll_d:+.0f}", (x0, y0 - 68), (255, 255, 255))
             put(frame, f"Ochi {eye_val} - {eye_state}", (x0, y0 - 48), eye_col)
             put(frame, f"Privire: {gm['direction'] or 'pe drum'}", (x0, y0 - 28), (255, 255, 0))
-            mouth_txt = "CASCA!" if yawning else ("gura deschisa" if wide else "gura inchisa")
-            put(frame, f"Gura jaw {jaw if jaw is not None else 0:.2f}/{JAW_OPEN:.2f} - {mouth_txt}", (x0, y0 - 8), mouth_col)
+            mouth_txt = ("YAWNING!" if yawning else "talking" if talking else
+                         "mouth open" if (mouth_shown or (wide and mouth_started)) else "mouth closed")
+            put(frame, f"Mouth jaw {jaw if jaw is not None else 0:.2f}/{JAW_OPEN:.2f} gap {gap:.3f} "
+                       f"swings {swings} - {mouth_txt}", (x0, y0 - 8), mouth_col)
             closure_txt = (f"OCHI INCHISI {bm['closed_sec']:.1f}s" if bm["closed_sec"] > 0 else
                            f"ultimul clipit acum {bm['since_last_blink']:.0f}s")
             put(frame, closure_txt, (x0, y1 + 20), eye_col)
@@ -815,7 +881,9 @@ def main():
         if key == ord("c"):
             calibrate(cap, face)
             gaze_tracker, blink_tracker, head_tracker = new_trackers()
-            closed_frames, yawn_since = 0, None
+            closed_frames, yawn_since, mouth_open = 0, None, False
+            gap_hist.clear()
+            mouth_delay, last_wide = Held(MOUTH_DELAY_S), -1e9
         if key == ord("m"):
             DRAW_MESH = not DRAW_MESH
 
