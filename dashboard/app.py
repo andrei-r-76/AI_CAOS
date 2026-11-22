@@ -245,7 +245,7 @@ def to_dashboard(s):
     state = "danger" if {"microsleep", "phone"} & set(flags) else "warn" if flags else "ok"
     ear = s.get("ear")
 
-    metrics = {"ear": s.get("eyes_closed_sec"), "perclos": s.get("perclos"), "blink_rate": s.get("blink_rate"),
+    metrics = {"ear": s.get("eyes_closed_sec"), "on_road": s.get("on_road_ratio"), "blink_rate": s.get("blink_rate"),
                "blink_ms": s.get("blink_ms") or (s.get("avg_blink_sec") or 0) * 1000,
                "squint": bool(s.get("squinting") or s.get("eyes_partially_closed")),
                "eyerub": bool(s.get("eyerub") or s.get("hand_at_eyes")),
@@ -254,7 +254,11 @@ def to_dashboard(s):
                "mar": s.get("mar"), "yawning": bool(s.get("yawning")),
                "phone": bool(s.get("hand_near_face") or s.get("phone_use")),
                "face": s.get("face_found", True),
-               "level": ALERT_LEVEL.get(s.get("alert_level"), 0)}
+               "level": ALERT_LEVEL.get(s.get("alert_level"), 0),
+               "eyes_closed_sec": s.get("eyes_closed_sec"),
+               "gaze": s.get("gaze"),
+               "glasses": s.get("glasses"),
+               "sunglasses": s.get("sunglasses")}
     return flags, state, metrics
 
 
