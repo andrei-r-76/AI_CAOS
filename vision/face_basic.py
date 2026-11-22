@@ -224,6 +224,11 @@ SUNGLASSES_MIN_S = 1.0     # TUNE: ...for this long (a blink or a shadow is shor
 SUNGLASSES_PATCH = 0.06    # size of the measured patches, as a fraction of the face width
 EYE_CENTERS = (468, 473)   # iris centers (MediaPipe still places them behind dark lenses)
 CHEEK_POINTS = (50, 280)   # left / right cheek, just below the eyes
+GLASSES_DIP = 0.25         # TUNE: a band on the nose bridge this much darker than the skin above AND below
+                           #       = the glasses bridge (~0.5 with dark frames, ~0 without glasses)
+GLASSES_MIN_S = 1.0        # TUNE: ...for this long
+BRIDGE_POINTS = (168, 6)   # top of the nose bridge, between the eyes (where the glasses bridge sits)
+INNER_EYE = (133, 362)     # inner eye corners (the measured strip is centered between them)
 
 
 def eye_cheek_ratio(frame, xy, face_box):
@@ -245,6 +250,26 @@ def eye_cheek_ratio(frame, xy, face_box):
         return None
     cheek = (cheeks[0] + cheeks[1]) / 2
     return (eyes[0] + eyes[1]) / 2 / cheek if cheek > 5 else None
+
+
+def glasses_dip(frame, xy, face_box):
+    """Glasses: a dark band (the frame bridge) on the nose between the eyes. Reads a thin vertical strip
+    there and returns how much darker its darkest row is than the skin above and below (0 = no band).
+    Call BEFORE drawing on the frame. None if the strip falls outside the image."""
+    h, w = frame.shape[:2]
+    fw = face_box[2] - face_box[0]
+    cx = (xy[INNER_EYE[0]][0] + xy[INNER_EYE[1]][0]) / 2
+    y0, y1 = int(xy[BRIDGE_POINTS[0]][1] - 0.06 * fw), int(xy[BRIDGE_POINTS[1]][1] + 0.03 * fw)
+    x0, x1 = int(cx - max(2, 0.04 * fw)), int(cx + max(2, 0.04 * fw))
+    if x0 < 0 or y0 < 0 or x1 > w or y1 > h or y1 - y0 < 6:
+        return None
+    gray = cv2.GaussianBlur(cv2.cvtColor(frame[y0:y1, x0:x1], cv2.COLOR_BGR2GRAY), (3, 3), 0)
+    prof = gray.mean(axis=1)                       # brightness of each row, top to bottom
+    m = int(prof.argmin())
+    if m == 0 or m == len(prof) - 1:               # darkest at an end = no band in the middle
+        return 0.0
+    skin = min(prof[:m].max(), prof[m:].max())     # the brighter skin above and below the band
+    return float(1 - prof[m] / skin) if skin > 5 else None
 
 
 def count_swings(vals, band):
@@ -611,6 +636,7 @@ def main():
     hand_tracker, health, alerts = HandFaceTracker(), CameraHealth(), AlertEngine()
     hand_filter = HandFilter()
     sunglasses_held = Held(SUNGLASSES_MIN_S)
+    glasses_held = Held(GLASSES_MIN_S)
 
     print("Started. q = quit, c = recalibrate, m = toggle face mesh.")
     t_start = time.time()
@@ -689,6 +715,7 @@ def main():
         xy = None
         face_box = None               # (x0, y0, x1, y1) of the driver's face, computed once per frame
         sunglasses = False
+        glasses = False
 
         # ---------- driver: full analysis ----------
         if driver is not None:
@@ -700,6 +727,8 @@ def main():
             x0, y0, x1, y1 = (int(v) for v in face_box)
             eye_ratio = eye_cheek_ratio(frame, xy, face_box)     # BEFORE drawing anything on the face
             sunglasses = sunglasses_held.update(now, eye_ratio is not None and eye_ratio < SUNGLASSES_RATIO)
+            dip = glasses_dip(frame, xy, face_box)                # BEFORE drawing too
+            glasses = glasses_held.update(now, dip is not None and dip > GLASSES_DIP) and not sunglasses
             cv2.rectangle(frame, (x0, y0), (x1, y1), DRIVER_COLOR, 2)
             if DRAW_MESH:
                 for x, y in xy:
@@ -805,6 +834,10 @@ def main():
             eye_val = f"R{op[0]:.2f} L{op[1]:.2f}" if op is not None else "-"
             if eye_ratio is not None:
                 eye_val += f" dark {eye_ratio:.2f}"            # eye/cheek brightness (sunglasses < SUNGLASSES_RATIO)
+            if dip is not None:
+                eye_val += f" bridge {dip:.2f}"                # nose-bridge dark band (glasses > GLASSES_DIP)
+            if glasses:
+                eye_state += " (glasses)"
             put(frame, f"Sofer  cap yaw {yaw_d:+.0f} pitch {pitch_d:+.0f} roll {roll_d:+.0f}", (x0, y0 - 68), (255, 255, 255))
             put(frame, f"Ochi {eye_val} - {eye_state}", (x0, y0 - 48), eye_col)
             put(frame, f"Privire: {gm['direction'] or 'pe drum'}", (x0, y0 - 28), (255, 255, 0))
@@ -819,6 +852,7 @@ def main():
 
         state["face_lost_sec"] = 0.0 if driver is not None else round(now - last_face_seen, 1)
         state["sunglasses"] = sunglasses
+        state["glasses"] = glasses
 
         # ---------- hands (relative to the driver's face) ----------
         hand_scores = [hd[0].score if hd else 0.0 for hd in (hand_res.handedness or [[]] * len(hands_px))]
@@ -860,7 +894,7 @@ def main():
         cv2.rectangle(frame, (0, 0), (w, 50), (25, 25, 25), -1)
         put(frame, f"Clipiri/min {state['blink_rate']}",
             (10, 20), (255, 255, 255), 0.5)
-        flags = [k for k in ("hand_near_face", "hand_at_ear", "hand_at_eyes", "hand_at_mouth", "sunglasses",
+        flags = [k for k in ("hand_near_face", "hand_at_ear", "hand_at_eyes", "hand_at_mouth", "sunglasses", "glasses",
                              "phone_detected", "camera_blocked", "low_light") if state[k]]
         put(frame, f"CLAHE {'ON' if _clahe_on else 'OFF'} (lumina {_brightness:.0f})  "
                    f"YOLO {'ON' if detector.available else 'OFF'}  "
