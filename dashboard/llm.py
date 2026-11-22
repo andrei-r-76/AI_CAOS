@@ -50,23 +50,67 @@ LEVELS = ["info", "warning", "critical"]
 EVENT_SEVERITY = {"pedestrian": "critical", "car_braking": "critical", "animal": "critical", "cyclist": "warning"}
 EVENT_SEC = 6               # live test: how long an outside event stays active
 RANDOM_EVENT_SEC = (20, 45)  # live test: a random event every 20-45 s
-# driver problem -> fixed fallback message, words a good message must contain
-FALLBACK = {
-    "drowsy": "Wake up! Open your eyes and focus on the road.",
-    "distracted": "Eyes back on the road, please.",
-    "phone": "Please put the phone down and focus on driving.",
-    "yawning": "You're yawning. Consider a short break soon.",
-    "hypnosis": "Take a short break soon.",
-    "no_face": "I can't see you. Please face the road.",
+# vision alert code (vision/alerts.py RULES, state.json "alert_reason") ->
+#   (text for the prompt, fixed fallback message, words a good message must contain)
+# The level comes from vision ("alert_level"). Codes not listed here get no spoken reaction.
+WAKE = ["wake", "eyes", "open", "stop", "rest", "break", "awake"]
+TIRED = ["tired", "break", "rest", "stop", "coffee"]
+ROAD = ["road", "eyes", "focus", "look", "ahead"]
+ALERTS = {
+    # critical
+    "sleep": (lambda s: f"eyes closed for {s.get('eyes_closed_sec', 0):.1f} seconds",
+              "Wake up! Open your eyes and stop the car.", WAKE),
+    "repeated_microsleep": (lambda s: f"eyes closing again: {s.get('microsleep_count_10min', 0)} microsleeps "
+                                      "in 10 minutes",
+                            "Wake up! Stop at the next safe place.", WAKE),
+    "microsleep": (lambda s: f"eyes closed for {s.get('eyes_closed_sec', 0):.1f} seconds",
+                   "Wake up! Open your eyes.", WAKE),
+    "head_drop": (lambda s: f"head fell forward, down for {s.get('head_down_sec', 0):.1f} seconds",
+                  "Wake up! Head up, eyes on the road.", WAKE + ["head"]),
+    "drowsy": (lambda s: "several fatigue signs at once: " + ", ".join(
+                   c.replace("_", " ") for c in s.get("active_alerts", []) if c in FATIGUE_SIGNS),
+               "You need a break. Stop at the next rest area.", TIRED),
+    "driver_missing": (lambda s: f"driver's face not visible for {s.get('face_lost_sec', 0):.0f} seconds",
+                       "Please face the road so I can see you.", ["road", "see you", "face the"]),
+    # warning
+    "phone_use": (lambda s: "using a phone while driving",
+                  "Please put the phone down and focus on driving.", ["phone"]),
+    "long_glance": (lambda s: f"looking {s.get('gaze', 'away')} for {s.get('looking_away_sec', 0):.0f} seconds",
+                    "Eyes back on the road, please.", ROAD),
+    "distraction": (lambda s: "talking while looking away from the road",
+                    "Keep your eyes on the road while you talk.", ROAD),
+    "glasses_missing": (lambda s: "driver normally wears glasses but is not wearing them",
+                        "Please put your glasses on.", ["glasses"]),
+    "head_nodding": (lambda s: f"head nodded {s.get('head_nods_1min', 0)} times in the last minute",
+                     "Take a short break soon.", TIRED),
+    "frequent_yawning": (lambda s: f"yawned {s.get('yawn_count_5min', 0)} times in 5 minutes",
+                         "Time for a short break soon.", TIRED),
+    "frequent_eye_rubbing": (lambda s: f"rubbed the eyes {s.get('eye_rub_count_5min', 0)} times in 5 minutes",
+                             "Take a short break soon.", TIRED),
+    "slow_blinking": (lambda s: f"{s.get('slow_blinks_1min', 0)} slow, heavy blinks in the last minute",
+                      "Take a short break soon.", TIRED),
+    "low_blink_rate": (lambda s: f"staring, only {s.get('blink_rate', 0)} blinks in the last minute",
+                       "Blink and look around the road.", ROAD + ["blink"]),
+    "camera_blocked": (lambda s: "the driver camera is covered",
+                       "Please uncover the driver camera.", ["camera"]),
+    # info
+    "yawning": (lambda s: "driver is yawning",
+                "You're yawning. Consider a short break soon.", TIRED + ["yawn"]),
+    "rubbing_eyes": (lambda s: "driver is rubbing the eyes",
+                     "Take a short break if you feel tired.", TIRED),
+    "phone_visible": (lambda s: "a phone is visible near the driver",
+                      "Keep the phone away while driving.", ["phone"]),
 }
-RELEVANT = {
-    "drowsy": ["wake", "eyes", "tired", "break", "awake", "open", "stop", "rest"],
-    "distracted": ["road", "eyes", "focus", "look", "ahead"],
-    "phone": ["phone"],
-    "yawning": ["yawn", "tired", "break", "rest", "coffee"],
-    "hypnosis": ["road", "eyes", "focus", "break"],
-    "no_face": ["road", "see you", "camera", "face the"],
-}
+FATIGUE_SIGNS = ("frequent_yawning", "frequent_eye_rubbing", "slow_blinking", "low_blink_rate", "head_nodding")
+FALLBACK = {code: fallback for code, (_, fallback, _) in ALERTS.items()}
+RELEVANT = {code: words for code, (_, _, words) in ALERTS.items()}
+# level of each alert, same as vision/alerts.py RULES (alert_level is the highest of ALL active alerts)
+LEVEL_OF = {**dict.fromkeys(["sleep", "repeated_microsleep", "microsleep", "head_drop", "drowsy",
+                             "driver_missing"], "critical"),
+            **dict.fromkeys(["phone_use", "long_glance", "distraction", "glasses_missing", "head_nodding",
+                             "frequent_yawning", "frequent_eye_rubbing", "slow_blinking", "low_blink_rate",
+                             "camera_blocked"], "warning"),
+            **dict.fromkeys(["yawning", "rubbing_eyes", "phone_visible"], "info")}
 UNSAFE = ["keep your eyes closed", "close your eyes", "go to sleep", "get some sleep", "nap",
           "i cannot", "i can't", "sorry", "i don't", "as an ai"]
 # proportionality: which actions each level may use
@@ -100,23 +144,12 @@ client = ollama.Client(timeout=TIMEOUT_SEC)   # OLLAMA_HOST in .env if Ollama ru
 
 
 def describe(state):
-    """Driver problem -> (reason, text, minimum level), or None if the driver is fine."""
-    if not state.get("face_found", True):
-        return "no_face", "driver's face is not visible to the camera", "warning"
-    if state.get("eyes_closed_sec", 0) >= 1.5:
-        return "drowsy", f"eyes closed for {state['eyes_closed_sec']:.1f} seconds", "critical"
-    if state.get("perclos", 0) >= 0.15:
-        return "drowsy", "eyes often closing, getting drowsy", "warning"
-    if state.get("looking_away_sec", 0) >= 2:
-        return "distracted", f"looking away from the road for {state['looking_away_sec']:.0f} seconds", "warning"
-    if state.get("vats_alert"):
-        return "distracted", "glancing away from the road too often", "warning"
-    if state.get("hand_near_face"):
-        return "phone", "holding a phone while driving", "critical"
-    if state.get("hypnosis"):
-        return "hypnosis", "highway hypnosis: gaze fixed, rare blinking", "warning"
-    if state.get("yawning"):
-        return "yawning", "driver is yawning", "info"
+    """Driver problem -> (reason, text, minimum level), or None if the driver is fine.
+    Vision already decided the alert (alert_reason / alert_level, see vision/alerts.py): the most
+    important active alert we have a message for is the reason; its level is the minimum level."""
+    for code in state.get("active_alerts") or [state.get("alert_reason")]:
+        if code in ALERTS:
+            return code, ALERTS[code][0](state), LEVEL_OF[code]
     return None
 
 
@@ -387,7 +420,7 @@ def live():
         state = read_state() or {}                    # no vision running -> only events are judged
         actions = emergency(state)
         if actions and not in_emergency:
-            print(f"[EMERGENCY] {FALLBACK['drowsy']} {actions}")
+            print(f"[EMERGENCY] {FALLBACK['sleep']} {actions}")
         in_emergency = bool(actions)
         if copilot.should_decide(state, context):
             d = copilot.decide(state, context)
@@ -407,13 +440,16 @@ if __name__ == "__main__":
            "vehicle": {"speed_kmh": 110, "cruise_control": True}, "events": []}
     ok = {"face_found": True}
     tests = [
-        ("yawning, first time", {**ok, "yawning": True}, ctx),
-        ("yawning again (history)", {**ok, "yawning": True}, ctx),
-        ("looking away", {**ok, "looking_away_sec": 3.2}, ctx),
+        ("yawning, first time", {**ok, "yawning": True, "active_alerts": ["yawning"]}, ctx),
+        ("yawning again (history)", {**ok, "yawning": True, "yawn_count_5min": 3,
+                                     "active_alerts": ["frequent_yawning", "yawning"]}, ctx),
+        ("looking away", {**ok, "gaze": "left", "looking_away_sec": 3.2, "active_alerts": ["long_glance"]}, ctx),
+        ("head drop", {**ok, "head_drop": True, "head_down_sec": 1.2, "active_alerts": ["head_drop"]}, ctx),
         ("pedestrian + attentive", ok, {**ctx, "events": [
             {"type": "pedestrian", "text": "a pedestrian is crossing ahead, not at a crosswalk",
              "severity": "critical", "keywords": ["pedestrian", "crossing", "person"]}]}),
-        ("eyes closed 3.5 s (emergency)", {**ok, "eyes_closed_sec": 3.5}, ctx),
+        ("eyes closed 3.5 s (emergency)", {**ok, "eyes_closed_sec": 3.5, "sleep": True,
+                                           "active_alerts": ["sleep"]}, ctx),
     ]
     for name, state, context in tests:
         history.add_problem(describe(state)[0], time.time()) if describe(state) else None
