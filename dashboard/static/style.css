@@ -7,7 +7,7 @@
   --primary: #000000;
   --primary-hover: #0a365c;
   --ok: #15803d;
-  --warn: #b45309;
+  --warn: #e6c107;
   --danger: #b91c1c;
 }
 
@@ -163,18 +163,6 @@ button:hover {
   color: var(--text);
 }
 
-.guidance-box {
-  margin-top: 18px;
-  padding-top: 16px;
-  border-top: 1px solid var(--row-border);
-}
-.guidance-box p {
-  margin: 4px 0 0;
-  font-size: 1.2rem;
-  font-weight: 700;
-  line-height: 1.4;
-  color: var(--text);
-}
 
 /* --- METRICS GRID (NO OUTLINES OR BORDERS ON VALUES) --- */
 .metrics-grid {
@@ -384,13 +372,6 @@ td:nth-child(2) {
 }
 .status-panel .status-title { font-size: 2rem; }
 .status-panel .status-sub { margin-top: 2px; font-size: 1rem; }
-.status-panel .guidance-box {
-  margin-top: 0;
-  padding: 0 0 0 24px;
-  border-top: none;
-  border-left: 1px solid var(--row-border);
-}
-.status-panel .guidance-box p { font-size: 1.05rem; line-height: 1.35; }
 
 /* --- DRIVER SUMMARY TILES --- */
 .tile-grid {
@@ -433,7 +414,6 @@ td:nth-child(2) {
 
 @media (max-width: 1150px) {
   .status-panel { grid-template-columns: 1fr; }
-  .status-panel .guidance-box { padding: 10px 0 0; border-left: none; border-top: 1px solid var(--row-border); }
 }
 
 /* tiles stretch to fill the summary panel so there is no empty gap at the bottom */
@@ -494,7 +474,7 @@ td:nth-child(5) { min-width: 170px; }
   display: inline-block;
   margin: 0 6px 6px 0;
   padding: 3px 9px;
-  border: 1px solid var(--border);
+  border: none;
   border-radius: 999px;
   background: var(--bg);
   font-size: 0.85rem;
@@ -513,3 +493,46 @@ tr.watching td:nth-child(4) { font-style: italic; }
 .summary-panel > .panel-header { grid-row: 1; grid-column: 1; }
 .summary-panel > .tile-grid { grid-row: 2; grid-column: 1; }
 .tile-grid[hidden] { display: grid; visibility: hidden; pointer-events: none; }
+
+/* --- DRIVER STATUS: solid colour block, easy to read from a distance --- */
+.status-panel { display: block; padding: 18px 24px; border: none; color: #ffffff; }
+.status-panel.state-ok     { background: var(--ok); }
+.status-panel.state-warn   { background: var(--warn); }
+.status-panel.state-danger { background: var(--danger); }
+.status-panel .field-label,
+.status-panel .status-sub,
+.status-panel .status-title { color: #ffffff; }
+.status-panel .status-title { font-size: 2.6rem; }
+.status-panel .status-sub { margin-top: 4px; font-size: 1.1rem; }
+
+/* --- LIVE SUGGESTION: a box floating in the free space at the bottom of the screen ---
+   Fixed to the bottom of the window, as wide as the dashboard content (same margins as the panels),
+   so it always sits in the empty area under the two columns. It only exists while there is a problem. */
+.suggestion-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 24px;
+  z-index: 50;
+  width: calc(min(100%, 1760px) - 64px);   /* the content width: 1760 px max, 32 px margin on each side */
+  margin: 0 auto;
+  padding: 24px 32px;
+  border: none;
+  border-radius: 8px;
+  color: #ffffff;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
+}
+.suggestion-bar.state-ok     { background: var(--ok); }
+.suggestion-bar.state-warn   { background: var(--warn); }
+.suggestion-bar.state-danger { background: var(--danger); }
+.suggestion-bar .field-label,
+.suggestion-bar p { color: #ffffff; }
+.suggestion-bar[hidden] { display: none; }
+.suggestion-bar p {
+  margin: 4px 0 0;
+  font-size: 2.1rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+/* while the box is showing, leave room under the page so it never covers the end of the tables */
+body:has(.suggestion-bar:not([hidden])) { padding-bottom: 190px; }
