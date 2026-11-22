@@ -20,9 +20,11 @@ SFACE_MODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "face_rec
 SFACE_URL = ("https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/"
              "face_recognition_sface_2021dec.onnx")
 
-MATCH_COS = 0.55        # TUNE: similarity above this = same person (OpenCV's own threshold: 0.363)
-ID_EVERY_S = 1.0        # TUNE: how often the face is checked
-ID_VOTES = 3            # TUNE: same answer this many checks in a row before switching driver
+MATCH_COS = 0.55        # TUNE: similarity above this = recognized (OpenCV's own threshold: 0.363)
+KEEP_COS = 0.30         # TUNE: a recognized driver is kept while his similarity stays above this (glasses off,
+                        #       other light); below it (a stranger is ~0.0-0.3) he becomes "unknown"
+ID_EVERY_S = 0.5        # TUNE: how often the face is checked (also how often the match bar updates)
+ID_VOTES = 3            # TUNE: same answer this many checks in a row before switching (~1.5 s)
 FRONTAL_YAW = 25        # only faces turned less than this (degrees): side views match badly
 ENROLL_SAMPLES = 5      # face prints saved for a new driver...
 ENROLL_EVERY_S = 0.4    # ...taken this far apart
@@ -45,6 +47,7 @@ class DriverID:
         self.votes = deque(maxlen=ID_VOTES)
         self.enroll_name, self.enroll_feats = None, []
         self.current = None                    # recognized / picked driver, kept while his face stays
+        self.manual = False                    # current driver was picked by hand (kept even with a low match)
         self.last_seen = -1e9
         self.last_score = None
 
@@ -57,6 +60,11 @@ class DriverID:
         crop = self.rec.alignCrop(frame, np.array(row + [1.0], np.float32))
         f = self.rec.feature(crop).flatten()
         return f / (np.linalg.norm(f) or 1.0)
+
+    @staticmethod
+    def similarity(f, driver):
+        """Best similarity between the face print and one driver's saved prints (-1 if none)."""
+        return max((float(np.dot(f, p)) for p in driver.get("faces", [])), default=-1.0)
 
     @staticmethod
     def best_match(f, drivers):
@@ -74,9 +82,9 @@ class DriverID:
         self.votes.clear()
 
     def pick(self, name):
-        """Driver picked by hand: kept like a recognized one, but if the face is another SAVED driver
+        """Driver picked by hand: kept even if his match is low, but if the face is another SAVED driver
         (ID_VOTES checks in a row), recognition switches to him."""
-        self.current = name
+        self.current, self.manual = name, True
         self.votes.clear()
 
     def update(self, t, frame, xy, face_box, yaw, drivers):
@@ -89,7 +97,7 @@ class DriverID:
             return None
         if xy is None:                                     # no face
             if t - self.last_seen > LOST_RESET_S:
-                self.current = None
+                self.current, self.manual = None, False
                 self.votes.clear()
             return None
         self.last_seen = t
@@ -112,13 +120,14 @@ class DriverID:
         if t - self.last_t < ID_EVERY_S:
             return None
         self.last_t = t
-        name, self.last_score = self.best_match(self.face_print(frame, xy, face_box), drivers)
-        if self.current and name is None:
-            # recognized and never left: a lower match now (glasses off, light, angle) is still him
-            self.votes.clear()
+        f = self.face_print(frame, xy, face_box)
+        name, self.last_score = self.best_match(f, drivers)
+        if self.current and name is None and (
+                self.manual or self.similarity(f, drivers.get(self.current, {})) >= KEEP_COS):
+            self.votes.clear()                             # still him: picked by hand, or only a bit lower match
             return None
         self.votes.append(name)
         if len(self.votes) == ID_VOTES and len(set(self.votes)) == 1:
-            self.current = name
+            self.current, self.manual = name, False
             return ("driver", name)
         return None

@@ -214,11 +214,14 @@ def main():
     panel = drivers.DriverPanel(WINDOW)       # one window: camera + drivers panel
     UI_SHOW = panel.show
     idf = faceid.DriverID()                   # who the driver is (switches the profile by itself)
-    calib = Calibration()
-    calib.path = drivers.calib_file(panel.active)
-    print(f"Driver: {panel.active or '- (none, add one in the Drivers window)'}  calibration: {calib.path}")
-    if not calib.load():
-        calib.run(cap, face, show)
+    calib = Calibration()                     # no calibration at start: only a driver's saved one is loaded
+    if panel.active:
+        calib.path = drivers.calib_file(panel.active)
+        print(f"Driver: {panel.active}  calibration: {calib.path}")
+        if not calib.load():
+            print("  he has no calibration yet -> press Recalibrate in the panel")
+    else:
+        print("No driver profile yet -> add one in the panel (Add and calibrate).")
 
     detector = objects.ObjectDetector(OBJECT_DETECTION)
     print(f"Object detection (YOLO): {detector.status}")
@@ -383,10 +386,17 @@ def main():
             if ev == "enroll":
                 idf.start_enroll(name)
                 continue
+            if name is None:                      # active driver deleted: default values until a profile is picked
+                calib = Calibration()
+                print("No driver selected -> add or pick one in the panel.")
+                reset = True
+                continue
             calib.path = drivers.calib_file(name)
             print(f"Driver: {name or '- (none)'}  calibration: {calib.path}")
             if ev in ("add", "calibrate") or not calib.load():
                 calib.run(cap, face, show)
+            if name not in panel.profiles["drivers"]:   # deleted during the calibration (it was cancelled)
+                continue
             if ev == "select":
                 idf.pick(name)                    # recognition still checks him
             if ev == "add" or (ev == "select" and not panel.has_face(name)):
