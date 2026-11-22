@@ -1,92 +1,87 @@
-"""The driver state shared by vision -> llm -> dashboard.
+"""The driver state shared by vision -> LLM -> dashboard (written to state.json several times a second).
 
-state.json contains ONLY what is useful for the LLM (R2) and the dashboard (R4): new_state() below.
-Vision also keeps a few internal values (internal_state()) that feed the alert rules and scores but
-are not written out.
-Adding a key: OK, tell the team. Renaming or removing a key: ask everyone first.
+new_state() is the JSON schema: every key with its "nothing detected" value.
+internal_state() adds a few values used only by the alert rules (not written to state.json).
 
-For the LLM: react to `alert_level` / `alert_reason` CHANGES, not to every update. The other keys are
-the details for the message (how long, where the driver looks, how tired, ...).
-state.json is written with a plain write: if a read fails (empty / half-written file), read again.
+For the LLM: react to CHANGES of alert_level / alert_reason (not to every update); the other keys are the
+details for the message. If reading state.json fails (half-written file), read it again.
 """
 
 
 def new_state():
-    """The public state (state.json), every key at its 'nothing detected' value."""
+    """The public state (state.json)."""
     return {
         # --- system ---
-        "ts": 0.0,                    # unix time of this state (if it stops changing, vision is not running)
-        "calibrated": False,          # a driver calibration is loaded
+        "ts": 0.0,                    # unix time (if it stops changing, vision is not running)
         "camera_blocked": False,      # camera covered / black image
         "low_light": False,           # image too dark
 
         # --- alerts: what the LLM reacts to ---
         "alert_level": "none",        # none | info | warning | critical
-        "alert_reason": "",           # most important active alert code (see alerts.RULES), "" if none
+        "alert_reason": "",           # most important active alert code (alerts.RULES), "" if none
         "active_alerts": [],          # all active alert codes, most important first
         "events": [],                 # last alerts that started: {ts, time, type, level}
-        "fatigue_level": "ok",        # ok | tired | drowsy
 
-        # --- people ---
+        # --- driver ---
+        "driver": "unknown",          # driver's name (as added in the panel), "unknown" until recognized
+        "face_learned": False,        # the driver's face is learned (he can be recognized automatically)
+        "calibrated": False,          # the driver's calibration succeeded / is loaded
         "face_found": False,          # the driver's face is visible
-        "face_lost_sec": 0.0,         # seconds the driver's face has been missing
-        "passenger_count": 0,         # other faces in view
+        "face_lost_sec": 0.0,         # seconds the face has been missing
 
-        # --- eyes / drowsiness ---
-        "eyes_closed_sec": 0.0,       # seconds both eyes closed continuously
-        "eye_openness_pct": 100,      # eye opening as % of the driver's normal (calibrated) opening
-        "eyes_partially_closed": False,   # opening <= 50% of normal, sustained (heavy eyelids)
+        # --- eyes ---
+        "eyes_closed_sec": 0.0,       # seconds both eyes have been closed
+        "eyes_open_sec": 0.0,         # seconds the eyes have been open since the last blink
+        "blink_rate": 0,              # blinks in the last minute
+        "slow_blinks_1min": 0,        # slow / heavy blinks in the last minute
         "microsleep": False,          # eyes closed 1-3 s
         "sleep": False,               # eyes closed over 3 s
-        "microsleep_count_10min": 0,  # microsleep episodes in the last 10 minutes
-        "perclos": 0.0,               # 0..1, share of the last 60 s with the eyes closed (0 is normal when awake)
-        "blink_rate": 0,              # blinks in the last minute
-        "squinting": False,  # eyelids narrowed (squint), not fully closed
+        "microsleep_count_10min": 0,  # microsleeps in the last 10 min
+
+        # --- glasses ---
+        "glasses": False,             # clear glasses on
+        "sunglasses": False,          # sunglasses on (closed eyes cannot be checked)
+        "glasses_missing": False,     # the profile says glasses, none seen
 
         # --- head ---
-        "head_yaw": 0.0,  # degrees, left/right relative to the calibrated road pose
-        "head_pitch": 0.0,  # degrees, up/down relative to the calibrated road pose
-        "head_roll": 0.0,  # degrees, sideways tilt
-
-        # --- mouth ---
-        "yawning": False,             # yawning right now
-        "yawn_count_5min": 0,         # yawns in the last 5 minutes
-
-        # --- gaze / attention ---
-        "gaze": "on_road",            # on_road | oglinda_stanga | oglinda_dreapta | oglinda_mijloc | bord |
-                                      #   stanga | dreapta | sus | jos
-        "looking_away_sec": 0.0,      # seconds not looking at the road, continuous
-        "long_glance": False,         # one look away >= 3 s
-        "on_road_ratio": 1.0,         # 0..1, share of the last 30 s looking at the road
-        "mirror_checks": 0,           # mirror glances in the last 60 s (good driving)
-        "mirror_too_long": False,     # looking at a mirror > 2 s
-        "hypnosis": False,            # highway hypnosis: eyes open, staring, rarely blinking
-
-        # --- head ---
-        "head_drop": False,           # head fell forward quickly (nodding off)
-        "head_nods_1min": 0,          # head drops that came back up, last minute
+        "head_yaw": 0.0,              # degrees left / right vs the calibrated road pose
+        "head_pitch": 0.0,            # degrees up / down vs the road pose
+        "head_roll": 0.0,             # degrees of sideways tilt
+        "head_drop": False,           # head fell forward fast (nodding off)
+        "head_down_sec": 0.0,         # seconds the head has stayed down after a drop
+        "head_nods_1min": 0,          # drops that came back up, last minute
         "head_tilt": False,           # head tilted sideways for a while
 
-        # --- hands / objects ---
+        # --- mouth ---
+        "yawning": False,             # yawning now
+        "yawn_count_5min": 0,         # yawns in the last 5 min
+
+        # --- gaze ---
+        "gaze": "on_road",            # on_road | left | right | up | down
+        "looking_away_sec": 0.0,      # seconds looking away from the road
+        "long_glance": False,         # one look away >= 3 s
+        "on_road_ratio": 1.0,         # 0..1, share of the last 30 s looking at the road
+        "distraction": False,         # talking while looking away from the road
+
+        # --- hands / phone ---
         "hand_near_face": False,      # a hand at the face
         "hand_at_ear": False,         # a hand held at the ear (phone call)
-        "hand_at_eyes": False,        # rubbing the eyes (fatigue)
-        "phone_use": False,           # phone at the ear / in the hand / at the face (hand or YOLO)
+        "hand_at_eyes": False,        # rubbing the eyes now
+        "eye_rub_count_5min": 0,      # eye rubs in the last 5 min
         "phone_detected": False,      # a phone is visible (YOLO)
-        "drinking": False,            # bottle / cup at the mouth (YOLO)
+        "phone_use": False,           # phone in the hand / at the face / hand at the ear
     }
 
 
 def internal_state():
-    """new_state() + internal values used only by the alert rules / scores (not written to state.json)."""
+    """new_state() + values used only by the alert rules (not written to state.json)."""
     s = new_state()
     s.update({
-        "one_eye_closed": False,      # wink / one eye closed (not drowsiness)
-        "perclos_drowsy": False,      # PERCLOS above the drowsy threshold
-        "slow_blinks": 0,             # slow/heavy blinks in the last minute
-        "phone_in_hand": False,       # YOLO phone box touching a hand
-        "phone_near_face": False,     # YOLO phone box at the face
-        "hand_at_mouth": False,       # hand at the mouth
+        "blink_rate_valid": False,    # a full minute watched: blink_rate is meaningful
+        "talking": False,             # the driver is talking (lips moving)
+        "phone_in_hand": False,       # a phone touching a hand (YOLO)
+        "phone_near_face": False,     # a phone at the face (YOLO)
+        "hand_at_mouth": False,       # a hand at the mouth
     })
     return s
 
