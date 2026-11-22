@@ -55,6 +55,7 @@ STATUS_LOOK = {          # how -> (pill text, color)
     "last used": ("IDENTIFYING...", MUTED),
     "unknown face": ("UNKNOWN FACE - NOT MONITORED", WARN),
     "deleted": ("NO DRIVER", MUTED),
+    "no profile": ("NO PROFILE - ADD A DRIVER", WARN),
 }
 
 
@@ -119,9 +120,10 @@ def _card(parent, title=None):
 class DriverPanel:
     def __init__(self, title="Driver Recognition"):
         self.profiles = load_profiles()
-        last = self.profiles["last"]
-        self.active = last if last in self.profiles["drivers"] else None
-        self.how = "last used"            # "recognized" / "picked by hand" / "unknown face" / ...
+        last, names = self.profiles["last"], sorted(self.profiles["drivers"])
+        # start with the last driver (or the first saved one); recognition then switches to whoever it sees
+        self.active = last if last in names else (names[0] if names else None)
+        self.how = "last used" if self.active else "no profile"   # also "recognized", "picked by hand", ...
         self.events = []
         self.alive = True
         self.glasses_now = None
@@ -221,7 +223,7 @@ class DriverPanel:
         self.name_entry.bind("<Return>", lambda e: self._add())
         _button(ncard, "+  Add and calibrate", self._add, "primary").pack(fill="x")
 
-        tk.Label(side, text="q - quit      f - face", bg=BG, fg=MUTED,
+        tk.Label(side, text="q - quit      f - face      c - cancel calibration", bg=BG, fg=MUTED,
                  font=(FONT, 8)).pack(side="bottom", pady=8)
 
         self._refresh()
@@ -360,7 +362,7 @@ class DriverPanel:
             return
         self.profiles["drivers"][name] = {"glasses": bool(self.glasses_now)}   # what the camera sees now
         self.name_entry.delete(0, "end")
-        self.root.focus_set()                             # keys (q / f) work again
+        self.root.focus_set()                             # keys (q / f / c) work again
         self._set_active(name, "new driver")
         self.events.append(("add", name))
 
@@ -374,9 +376,11 @@ class DriverPanel:
         except OSError:
             pass
         if name == self.active:
-            self.active, self.how = None, "deleted"
+            self.active = None
+            self.how = "deleted" if self.profiles["drivers"] else "no profile"
             self.profiles["last"] = None
             self.events.append(("select", None))
+            self.key = ord("c")                           # cancels his calibration if one is running
         save_profiles(self.profiles)
         self._refresh()
 

@@ -13,6 +13,10 @@ const SUGGESTIONS = {
   danger: "Critical attention drop. Please pull over safely as soon as possible."
 };
 
+const GAZE = { on_road: "On road", left: "Left", right: "Right", up: "Up", down: "Down" };
+const MIRROR_GAZE = true;    // the camera image is mirrored: swaps Left and Right (set to false to undo)
+const gazeLabel = v => (MIRROR_GAZE && (v === "left" || v === "right")) ? GAZE[v === "left" ? "right" : "left"] : (GAZE[v] || v);
+
 const NAMES = {
   microsleep: "Microsleep",
   drowsy: "Drowsiness",
@@ -31,8 +35,12 @@ const DELAYS = {
 
 let suggestUntil = 0;          // keep the suggestion visible until this time (ms)
 const SUGGEST_HOLD_MS = 8000;
+let currentState = "ok";       // last driver state from the server: ok | warn | danger
 function showSuggestion(on) {
-  $("guidance").hidden = !on;
+  const g = $("guidance");
+  g.hidden = !on;
+  // the bar takes the colour of the state (shown briefly after recovery too, then as "warn")
+  if (on) g.className = "panel suggestion-bar state-" + (currentState === "ok" ? "warn" : currentState);
   if (!on) $("suggestion-text").textContent = "";
 }
 function pushSuggestion(text) {
@@ -63,6 +71,7 @@ src.onmessage = e => {
 const deg = v => (v == null || Number.isNaN(Number(v))) ? "-" : Math.round(Number(v)) + "°";
 
 let activeFlags = [];
+const microTimes = [];            // when each microsleep alert arrived (ms)
 const flagSince = {}, flagLast = {};   // flag -> when it became active / when it was last seen
 const FLAG_GRACE_MS = 1500;      // a flag may drop out for up to this long without restarting its timer (detector flicker)
 function onMetrics({ metrics: m, flags, state, t, yawns, source, vehicle }) {
@@ -72,6 +81,7 @@ function onMetrics({ metrics: m, flags, state, t, yawns, source, vehicle }) {
   Object.keys(flagSince).forEach(f => {
     if (!flags.includes(f) && nowMs - flagLast[f] > FLAG_GRACE_MS) { delete flagSince[f]; delete flagLast[f]; }
   });
+  currentState = state;
   renderVehicle(vehicle);
   updateActionRows(vehicle);
   handleAsleep(flags);
@@ -86,9 +96,16 @@ function onMetrics({ metrics: m, flags, state, t, yawns, source, vehicle }) {
   const noFace = m.face === false;
   const f = (v, fn) => (noFace || v == null ? "-" : fn(v));
   const yn = v => (v ? "Yes" : "No");
-  $("m-ear").textContent = f(m.ear, v => Math.round(Math.max(0, Math.min(100, 100 - v * 25))) + "%");
-  $("m-perclos").textContent = f(m.perclos, v => Math.round(v * 100) + "%");
-  $("m-blinks").textContent = f(m.blink_rate, v => Math.round(v) + "/min" + (m.blink_ms == null ? "" : ", " + Math.round(m.blink_ms) + " ms"));
+  $("m-gaze").textContent = f(m.gaze, gazeLabel);    // where the driver is looking
+  // microsleeps in the last 10 min: the server's number if it sends one, otherwise counted here from the alerts
+  const cutoff = Date.now() - 600000;
+  while (microTimes.length && microTimes[0] < cutoff) microTimes.shift();
+  $("m-micro").textContent = String(m.microsleeps_10min ?? microTimes.length);
+  // glasses: "Yes" for clear glasses or sunglasses; sunglasses are noted underneath (closed eyes cannot be checked through them)
+  const hasGlasses = (m.glasses == null && m.sunglasses == null) ? null : !!(m.glasses || m.sunglasses);
+  $("m-glasses").textContent = f(hasGlasses, yn);
+  $("c-glasses").textContent = (!noFace && m.sunglasses) ? "Sunglasses" : "";
+  $("m-closed").textContent = f(m.eyes_closed_sec, v => v.toFixed(1) + " s");   // seconds both eyes have been closed
   $("m-eyerub").textContent = f(m.eyerub, yn);
   // yaw / pitch: also accept the raw detector names (head_yaw / head_pitch) if the server passes them through
   $("m-yaw").textContent = noFace ? "-" : deg(m.yaw ?? m.head_yaw);
@@ -111,6 +128,7 @@ function onMetrics({ metrics: m, flags, state, t, yawns, source, vehicle }) {
 
 function onAlert(a) {
   stats.alerts++; stats.counts[a.kind] = (stats.counts[a.kind] || 0) + 1;
+  if (a.kind === "microsleep") microTimes.push(Date.now());
   $("s-alerts").textContent = stats.alerts;
   renderCounts();
   pushSuggestion(a.text);
@@ -393,7 +411,7 @@ setInterval(() => {
 // the "This session" column of the driver summary
 function renderCounts() {
   const n = k => stats.counts[k] || 0;
-  $("c-perclos").textContent = `Drowsy: ${n("drowsy")} / Microsleep: ${n("microsleep")} `;
+  $("c-micro").textContent = `This session: ${n("microsleep")}`;
   $("c-eyerub").textContent = `${n("eyerub")} `;
   $("c-yaw").textContent = `Looking away: ${n("distracted")} `;
   $("c-pitch").textContent = `Nodding: ${n("nod")} `;
@@ -401,7 +419,6 @@ function renderCounts() {
   $("c-mar").textContent = `Yawning: ${n("yawn")}  / ${stats.yawns5} in last 5 min`;
   $("c-phone").textContent = `${n("phone")} `;
   $("c-alerts").textContent = `Highest level: ${stats.maxLevel}`;
-  $("s-ok").textContent = stats.totT ? Math.round(100 * stats.okT / stats.totT) + "%" : "-";
 }
 renderCounts();
 
