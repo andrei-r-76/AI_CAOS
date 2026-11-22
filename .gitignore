@@ -1,6 +1,3 @@
-# Organizer materials: confidential under NDA (rules Art. 7.3). Never commit or paste into AI tools.
-context/
-
 # Python
 .venv/
 venv/
@@ -13,12 +10,35 @@ __pycache__/
 # Models / local artifacts
 *.pt
 *.task
-models/
-recordings/
 
 # Editors / OS
 .vscode/
 .idea/
 .DS_Store
-*_landmarker.task
-state.json
+
+# Runtime files written by the detector
+*.json
+*.csv
+frame.jpg
+*.tmp
+
+# Secrets (variants of .env)
+.env*
+!.env.example
+
+# Other model formats and recordings
+*.onnx
+*.tflite
+
+# Python tooling
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+*.log
+
+# OS (Windows)
+Thumbs.db
+desktop.ini
+

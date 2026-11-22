@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Driver Monitoring System</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body data-lang="{{ lang }}">
+
+<header class="topbar">
+  <h1>Driver Monitoring System</h1>
+  <div class="top-right">
+    <label class="switch"><input type="checkbox" id="voice-toggle" checked> Car voice</label>
+    <label class="switch"><input type="checkbox" id="alarm-toggle" checked> Alarm sound</label>
+  </div>
+</header>
+<main class="layout-16-9">
+  <!-- LEFT COLUMN: DRIVER STATUS, GUIDANCE & METRICS -->
+  <section class="left-col">
+    <!-- Driver Status & Guidance -->
+    <div id="hero" class="panel status-panel state-ok">
+      <div class="status-top">
+        <span class="field-label">Driver Status</span>
+        <div class="status-title" id="hero-state">OK</div>
+        <div class="status-sub" id="hero-sub">Driver looks attentive.</div>
+      </div>
+    </div>
+
+    <!-- Driver summary: live values (big) and session counts (small), as tiles -->
+    <div class="panel summary-panel">
+      <div class="panel-header tabs" role="tablist">
+        <button class="tab on" id="tab-btn-driver" role="tab" aria-selected="true" aria-controls="tab-driver" data-tab="driver">Driver summary</button>
+        <button class="tab" id="tab-btn-vehicle" role="tab" aria-selected="false" aria-controls="tab-vehicle" data-tab="vehicle">Vehicle summary</button>
+      </div>
+      <div class="tile-grid" id="tab-driver" role="tabpanel" aria-labelledby="tab-btn-driver">
+        <div class="tile">
+          <span class="tile-label">Gaze</span>
+          <div class="tile-val" id="m-gaze">-</div>
+
+        </div>
+        <div class="tile">
+          <span class="tile-label">Microsleeps</span>
+          <div class="tile-val" id="m-micro">-</div>
+          <div class="tile-sub" id="c-micro"></div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Time eyes closed</span>
+          <div class="tile-val" id="m-closed">-</div>
+
+        </div>
+        <div class="tile">
+          <span class="tile-label">Eye rubbing</span>
+          <div class="tile-val" id="m-eyerub">-</div>
+          <div class="tile-sub" id="c-eyerub"></div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Yaw</span>
+          <div class="tile-val" id="m-yaw">-</div>
+          <div class="tile-sub" id="c-yaw"></div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Pitch</span>
+          <div class="tile-val" id="m-pitch">-</div>
+          <div class="tile-sub" id="c-pitch"></div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Face in view</span>
+          <div class="tile-val" id="m-face">-</div>
+          <div class="tile-sub" id="c-face"></div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Mouth opening</span>
+          <div class="tile-val" id="m-mar">-</div>
+          <div class="tile-sub" id="c-mar"></div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Phone in hand</span>
+          <div class="tile-val" id="m-phone">-</div>
+          <div class="tile-sub" id="c-phone"></div>
+        </div>
+
+        <div class="tile">
+          <span class="tile-label">Has glasses</span>
+          <div class="tile-val" id="m-glasses">-</div>
+          <div class="tile-sub" id="c-glasses"></div>
+        </div>
+          <div class="tile">
+          <span class="tile-label">Alerts</span>
+          <div class="tile-val" id="s-alerts">0</div>
+          <div class="tile-sub" id="c-alerts"></div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Session time</span>
+          <div class="tile-val" id="s-time">00:00</div>
+
+        </div>
+      </div>
+      <div class="tile-grid" id="tab-vehicle" role="tabpanel" aria-labelledby="tab-btn-vehicle" hidden>
+        <div class="tile">
+          <span class="tile-label">Speed</span>
+          <div class="tile-val" id="v-speed">-</div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Throttle</span>
+          <div class="tile-val" id="v-throttle">-</div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Brake</span>
+          <div class="tile-val" id="v-brake">-</div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Hazard lights</span>
+          <div class="tile-val" id="v-hazard">-</div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Seat vibration</span>
+          <div class="tile-val" id="v-seat">-</div>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Wheel vibration</span>
+          <div class="tile-val" id="v-wheel">-</div>
+        </div>
+        <div class="tile tile-wide">
+          <span class="tile-label">Cruise control</span>
+          <div class="tile-val" id="v-cruise">-</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT COLUMN: DETECTION LOG + VOICE/TEXT DIALOGUE -->
+  <section class="right-col">
+    <div class="panel log-panel">
+      <div class="panel-header">
+        <h2>Detection &amp; Response Log</h2>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Detection</th>
+              <th>Severity</th>
+              <th>System Response</th>
+              <th>Car actions</th>
+            </tr>
+          </thead>
+          <tbody id="log-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- LIVE SUGGESTION: long bar across the whole bottom of the dashboard (only visible while there is a problem) -->
+  <section id="guidance" class="panel suggestion-bar" hidden>
+    <span class="field-label">Live Suggestion</span>
+    <p id="suggestion-text">Attention level optimal. Keep your eyes on the road ahead.</p>
+  </section>
+</main>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

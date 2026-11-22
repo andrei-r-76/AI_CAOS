@@ -58,6 +58,7 @@ git push -u origin NUME_BRANCH      # Push
 git switch NUME_BRANCH              # Change to branch
 git switch -c feat/NUME_TASK        # Create new branch
 git --no-pager log -10 --oneline    # Last 10 commits
+git branch -a                       # List branches
 
 # USUAL WORKFLOW:
 # Pull the latest dev and create your task branch
