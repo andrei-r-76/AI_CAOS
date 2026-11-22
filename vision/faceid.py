@@ -21,7 +21,7 @@ SFACE_URL = ("https://github.com/opencv/opencv_zoo/raw/main/models/face_recognit
              "face_recognition_sface_2021dec.onnx")
 
 MATCH_COS = 0.55        # TUNE: similarity above this = recognized (OpenCV's own threshold: 0.363)
-KEEP_COS = 0.30         # TUNE: a recognized driver is kept while his similarity stays above this (glasses off,
+KEEP_COS = 0.55         # TUNE: a recognized driver is kept while his similarity stays above this (glasses off,
                         #       other light); below it (a stranger is ~0.0-0.3) he becomes "unknown"
 ID_EVERY_S = 0.5        # TUNE: how often the face is checked (also how often the match bar updates)
 ID_VOTES = 3            # TUNE: same answer this many checks in a row before switching (~1.5 s)
