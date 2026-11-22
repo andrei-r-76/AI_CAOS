@@ -14,7 +14,7 @@ Modules (same folder):
   alerts.py     scores, counters, ONE alert level + reason, event log  -> what the LLM reacts to
   state.py      the shared state schema written to state.json
 
-Only the DRIVER (the largest face, "sticky") gets the full analysis; other faces are counted as passengers.
+Only the DRIVER is analysed: the first (largest) face found, kept even when other faces enter the frame.
 
 TUNING NOTE: every line marked "TUNE:" (here and in the modules) is a value you can adjust.
 Values computed at calibration (JAW_OPEN, EYE_OPEN_CLOSED, head pose on the road, gaze zones) are
@@ -38,6 +38,7 @@ from camera import Camera, reopen_camera
 from hand_face import HandFaceTracker, HandFilter
 from head import HeadTracker, head_angles
 from state import internal_state, public
+from timing import Held
 
 # --- models (downloaded automatically on first run) ---
 FACE_MODEL = "face_landmarker.task"
@@ -83,7 +84,6 @@ CLOSED_MIN_S = 0.07        # TUNE: eyes must stay below the threshold this long 
 CLOSED_MIN_FRAMES = 2      # TUNE: ...but never fewer frames than this (filters single-frame noise)
 
 # --- EYES vs HEAD POSE ---
-YAW_TURNED = 25.0          # TUNE: head turned more than this: a single closed eye is just the far eye hidden
 YAW_EYES_MAX = 45.0        # TUNE: eyes are still checked up to this head yaw; beyond it one eye is hidden.
                            #       (A sleeping driver whose head falls sideways is still caught up to here.)
 LOOK_DOWN_BS = 0.45        # TUNE: eyeLookDown blendshape above this = looking down (phone / dashboard)
@@ -105,10 +105,10 @@ PRINT_STATE = False        # TUNE: also print the state to the console (noisy, s
 DRAW_MESH = True           # TUNE: draw all 478 face points (key m). Off = a few FPS more
 OBJECT_DETECTION = True    # TUNE: YOLO phone / bottle / cup (needs `ultralytics`; off = faster)
 
-# --- FACE TRACKING (stable IDs, so the driver is never confused with a passenger) ---
+# --- FACE TRACKING (stable IDs: we stay on the same driver even if other faces enter the frame) ---
 TRACK_MAX_JUMP = 0.25      # TUNE: max face-center move between frames (fraction of frame width) to keep the ID
-TRACK_GRACE_S = 0.5        # TUNE: a face missing for less than this keeps its ID
-DRIVER_SWITCH_RATIO = 1.5  # TUNE: another face must be this many times larger to become the driver
+TRACK_GRACE_S = 2.0        # TUNE: the driver's face missing for less than this keeps its ID (we wait for them
+                           #       instead of jumping to another face)
 
 # --- HANDS ---
 HAND_DETECT_CONF = 0.6     # TUNE: lower (0.5) if hands are missed, higher if ghosts appear
@@ -132,7 +132,7 @@ HEALTH_MIN_S = 1.0         # TUNE: a condition must last this long before it is 
 HAND_CONNECTIONS = [(0, 1), (1, 2), (2, 3), (3, 4), (0, 5), (5, 6), (6, 7), (7, 8),
                     (5, 9), (9, 10), (10, 11), (11, 12), (9, 13), (13, 14), (14, 15),
                     (15, 16), (13, 17), (17, 18), (18, 19), (19, 20), (0, 17)]
-DRIVER_COLOR, PASSENGER_COLOR = (0, 255, 0), (255, 150, 0)
+DRIVER_COLOR = (0, 255, 0)
 ALERT_COLORS = {"none": (60, 160, 60), "info": (200, 160, 0), "warning": (0, 140, 255), "critical": (0, 0, 220)}
 STATE_FILE = "state.json"
 WINDOW = "MediaPipe - sofer"
@@ -205,6 +205,33 @@ def to_mp_image(frame):
     measure_light(frame)
     rgb = cv2.cvtColor(enhance(frame), cv2.COLOR_BGR2RGB)
     return mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+
+SUNGLASSES_RATIO = 0.45    # TUNE: eye area darker than this fraction of the cheeks = sunglasses
+SUNGLASSES_MIN_S = 1.0     # TUNE: ...for this long (a blink or a shadow is shorter)
+SUNGLASSES_PATCH = 0.06    # size of the measured patches, as a fraction of the face width
+EYE_CENTERS = (468, 473)   # iris centers (MediaPipe still places them behind dark lenses)
+CHEEK_POINTS = (50, 280)   # left / right cheek, just below the eyes
+
+
+def eye_cheek_ratio(frame, xy, face_box):
+    """How dark the eyes are compared to the cheeks (gray mean of small patches). ~0.6-0.9 normal eyes,
+    much lower with sunglasses. Call BEFORE drawing on the frame. None if a patch falls outside the image."""
+    h, w = frame.shape[:2]
+    r = max(3, int(SUNGLASSES_PATCH * (face_box[2] - face_box[0])))
+
+    def patch_mean(i):
+        cx, cy = int(xy[i][0]), int(xy[i][1])
+        x0, x1, y0, y1 = max(0, cx - r), min(w, cx + r), max(0, cy - r), min(h, cy + r)
+        if x1 - x0 < 2 or y1 - y0 < 2:
+            return None
+        return float(cv2.cvtColor(frame[y0:y1, x0:x1], cv2.COLOR_BGR2GRAY).mean())
+
+    eyes = [patch_mean(i) for i in EYE_CENTERS]
+    cheeks = [patch_mean(i) for i in CHEEK_POINTS]
+    if None in eyes or None in cheeks:
+        return None
+    cheek = (cheeks[0] + cheeks[1]) / 2
+    return (eyes[0] + eyes[1]) / 2 / cheek if cheek > 5 else None
 
 
 def blendshapes(face_res, idx):
@@ -545,6 +572,7 @@ def main():
     gaze_tracker, blink_tracker, head_tracker = new_trackers()
     hand_tracker, health, alerts = HandFaceTracker(), CameraHealth(), AlertEngine()
     hand_filter = HandFilter()
+    sunglasses_held = Held(SUNGLASSES_MIN_S)
 
     print("Started. q = quit, c = recalibrate, m = toggle face mesh.")
     t_start = time.time()
@@ -601,32 +629,24 @@ def main():
         areas = [box_area(pts) for pts in lms]
         driver = None
         if n_faces:
-            biggest = max(range(n_faces), key=lambda k: areas[k])
-            cur = ids.index(driver_id) if driver_id in ids else None
-            driver = cur if (cur is not None and areas[biggest] < DRIVER_SWITCH_RATIO * areas[cur]) else biggest
-            if ids[driver] != driver_id:
-                if driver_id in ids:              # a different person (still in view) became the driver
-                    gaze_tracker, blink_tracker, head_tracker = new_trackers()
-                    closed_frames, yawn_since = 0, None
+            if driver_id in ids:
+                driver = ids.index(driver_id)     # same person as before, whatever other faces do
+            elif driver_id is None or driver_id not in _tracks:
+                # no driver yet, or the driver has been gone longer than TRACK_GRACE_S: take the largest face
+                driver = max(range(n_faces), key=lambda k: areas[k])
                 driver_id = ids[driver]
-
-        for idx, pts in enumerate(lms):           # passengers: box + label only
-            if idx == driver:
-                continue
-            xs, ys = [p.x * w for p in pts], [p.y * h for p in pts]
-            cv2.rectangle(frame, (int(min(xs)), int(min(ys))), (int(max(xs)), int(max(ys))), PASSENGER_COLOR, 2)
-            put(frame, "Pasager", (int(min(xs)), int(min(ys)) - 8), PASSENGER_COLOR, 0.6)
+            # else: the driver is briefly out of view -> wait for them, never jump to another face
 
         state = internal_state()
         state["ts"] = round(now, 2)
         state["fps"] = round(fps, 1)
         state["calibrated"] = CALIBRATED
         state["face_found"] = driver is not None
-        state["passenger_count"] = max(0, n_faces - 1)
         state.update(cam)
         gm = bm = None
         xy = None
         face_box = None               # (x0, y0, x1, y1) of the driver's face, computed once per frame
+        sunglasses = False
 
         # ---------- driver: full analysis ----------
         if driver is not None:
@@ -636,6 +656,8 @@ def main():
             xs, ys = [p[0] for p in xy], [p[1] for p in xy]
             face_box = (min(xs), min(ys), max(xs), max(ys))
             x0, y0, x1, y1 = (int(v) for v in face_box)
+            eye_ratio = eye_cheek_ratio(frame, xy, face_box)     # BEFORE drawing anything on the face
+            sunglasses = sunglasses_held.update(now, eye_ratio is not None and eye_ratio < SUNGLASSES_RATIO)
             cv2.rectangle(frame, (x0, y0), (x1, y1), DRIVER_COLOR, 2)
             if DRAW_MESH:
                 for x, y in xy:
@@ -656,12 +678,10 @@ def main():
             look_down = look_down_score > LOOK_DOWN_BS
             op = gaze.eye_openness(xy)
             thr = EYE_OPEN_CLOSED * (LOOK_DOWN_RELAX if look_down else 1.0)
-            if op is not None and not eyes_hidden:
-                ce_r, ce_l = op[0] < thr, op[1] < thr
-                below = ce_r and ce_l                    # "eyes closed" = BOTH (one eye = blink/wink)
-                one_eye = (ce_r != ce_l) and abs(yaw_d) <= YAW_TURNED   # turned head: the far eye just looks closed
+            if op is not None and not eyes_hidden and not sunglasses:
+                below = op[0] < thr and op[1] < thr      # "eyes closed" = BOTH eyes below the threshold
             else:
-                below = one_eye = False
+                below = False
             closed_frames = closed_frames + 1 if below else 0
             need = max(CLOSED_MIN_FRAMES, round(CLOSED_MIN_S * fps)) if fps else CLOSED_MIN_FRAMES
             closed = closed_frames >= need
@@ -689,7 +709,6 @@ def main():
                 "eyes_closed_sec": round(bm["closed_sec"], 1),
                 "eyes_open_sec": bm["eyes_open_sec"],
                 "since_last_blink_sec": round(bm["since_last_blink"], 1),
-                "one_eye_closed": one_eye,
                 "yawning": yawning,
                 "head_yaw": round(yaw_d, 1), "head_pitch": round(pitch_d, 1), "head_roll": round(roll_d, 1),
                 **hm,
@@ -716,8 +735,12 @@ def main():
             cv2.line(frame, mt, mb, mouth_col, 2)
             cv2.line(frame, ml, mr, mouth_col, 2)
 
-            eye_state = ("n/a (cap intors)" if eyes_hidden else "INCHISI" if closed else "deschisi")
+            eye_state = ("eyes not detected (sunglasses)" if sunglasses else
+                         "eyes not detected" if (eyes_hidden or op is None) else
+                         "CLOSED" if closed else "open")
             eye_val = f"R{op[0]:.2f} L{op[1]:.2f}" if op is not None else "-"
+            if eye_ratio is not None:
+                eye_val += f" dark {eye_ratio:.2f}"            # eye/cheek brightness (sunglasses < SUNGLASSES_RATIO)
             put(frame, f"Sofer  cap yaw {yaw_d:+.0f} pitch {pitch_d:+.0f} roll {roll_d:+.0f}", (x0, y0 - 68), (255, 255, 255))
             put(frame, f"Ochi {eye_val} - {eye_state}", (x0, y0 - 48), eye_col)
             put(frame, f"Privire: {gm['direction'] or 'pe drum'}", (x0, y0 - 28), (255, 255, 0))
@@ -729,6 +752,7 @@ def main():
             draw_gaze_panel(frame, gm, w - 206, 72)
 
         state["face_lost_sec"] = 0.0 if driver is not None else round(now - last_face_seen, 1)
+        state["sunglasses"] = sunglasses
 
         # ---------- hands (relative to the driver's face) ----------
         hand_scores = [hd[0].score if hd else 0.0 for hd in (hand_res.handedness or [[]] * len(hands_px))]
@@ -768,10 +792,10 @@ def main():
             put(frame, f"{lvl.upper()}: {state['alert_reason']}" + (f"  (+ {others})" if others else ""),
                 (12, h - 67), (255, 255, 255), 0.6)
         cv2.rectangle(frame, (0, 0), (w, 50), (25, 25, 25), -1)
-        put(frame, f"Pasageri {state['passenger_count']}  Clipiri/min {state['blink_rate']}",
+        put(frame, f"Clipiri/min {state['blink_rate']}",
             (10, 20), (255, 255, 255), 0.5)
-        flags = [k for k in ("hand_near_face", "hand_at_ear", "hand_at_eyes", "phone_detected",
-                             "camera_blocked", "low_light") if state[k]]
+        flags = [k for k in ("hand_near_face", "hand_at_ear", "hand_at_eyes", "hand_at_mouth", "sunglasses",
+                             "phone_detected", "camera_blocked", "low_light") if state[k]]
         put(frame, f"CLAHE {'ON' if _clahe_on else 'OFF'} (lumina {_brightness:.0f})  "
                    f"YOLO {'ON' if detector.available else 'OFF'}  "
                    + (" ".join(flags) if flags else "[c] calib [m] mesh [q] iesire"),

@@ -37,6 +37,7 @@ RULES = [
     ("yawning",          "info",     lambda s: s["yawning"]),
     ("rubbing_eyes",     "info",     lambda s: s["hand_at_eyes"]),
     ("drinking",         "info",     lambda s: s["drinking"]),
+    ("hand_at_mouth",    "info",     lambda s: s["hand_at_mouth"]),
     ("phone_visible",    "info",     lambda s: s["phone_detected"]),
     ("head_tilt",        "info",     lambda s: s["head_tilt"]),
     ("eyes_partially_closed", "info", lambda s: s["eyes_partially_closed"]),

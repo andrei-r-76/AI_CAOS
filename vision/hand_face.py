@@ -27,7 +27,7 @@ AT_MOUTH_MIN_S = 0.5
 
 
 HAND_MIN_SCORE = 0.80      # TUNE: minimum "this is a hand" score (handedness confidence) to accept a hand
-GHOST_MAX_SIZE = 0.70      # TUNE: a "hand" that lies COMPLETELY inside the face box and is smaller than this
+GHOST_MAX_SIZE = 0.50      # TUNE: a "hand" that lies COMPLETELY inside the face box and is smaller than this
                            #       * face width is a ghost (the hand model seeing a hand in the face).
                            #       A real hand at the face sticks out of the face box (wrist, fingers).
 HAND_CONFIRM_FRAMES = 3    # TUNE: a hand must be seen this many frames in a row before it is used
@@ -86,7 +86,8 @@ class HandFaceTracker:
                     now["at_ear"] = True
                 if any(near(p, face_xy[e], EYE_RADIUS) for p in tips for e in EYE_CENTERS):
                     now["at_eyes"] = True
-                if any(near(p, face_xy[m], MOUTH_RADIUS) for p in pts for m in MOUTH_POINTS):
+                # ALL 21 hand points: a palm / knuckles over the mouth count, not only the wrist and fingertips
+                if any(near(p, face_xy[m], MOUTH_RADIUS) for p in hand for m in MOUTH_POINTS):
                     now["at_mouth"] = True
 
         if now["at_eyes"]:
